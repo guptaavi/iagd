@@ -1,0 +1,108 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared build settings for the hook DLL.
+
+  This file exists so that Custom.vcxproj no longer carries absolute paths to one
+  developer's boost and Visual Studio installs. Every configuration in that project
+  used to hardcode them, which meant the project only built on the machine it was
+  last edited on.
+
+  Those path lists were a mix of genuinely dead entries (an Enterprise atlmfc directory,
+  an SDK version that is not installed) and one entry that quietly kept the build working
+  at all (see UcrtCompatIncludeDir below). Nothing in the project said which was which.
+
+  MSBuild imports this automatically for any project underneath HookDll\.
+-->
+<Project>
+
+  <PropertyGroup>
+    <!--
+      Where boost lives. Resolution order, first hit wins:
+        1. /p:BoostRoot=... on the command line
+        2. the BOOST environment variable, which the project already referenced
+        3. the two locations this project has historically been built from
+      Set BOOST (or pass BoostRoot) rather than adding a fourth default here.
+    -->
+    <BoostRoot Condition="'$(BoostRoot)' == '' And '$(BOOST)' != ''">$(BOOST)</BoostRoot>
+    <BoostRoot Condition="'$(BoostRoot)' == '' And Exists('D:\Programs\boost_1_78_0_v143\boost\version.hpp')">D:\Programs\boost_1_78_0_v143</BoostRoot>
+    <BoostRoot Condition="'$(BoostRoot)' == '' And Exists('D:\Programs\boost_1_78_0\boost\version.hpp')">D:\Programs\boost_1_78_0</BoostRoot>
+    <BoostRoot Condition="'$(BoostRoot)' == '' And Exists('D:\Dev\boost_1_78_0\boost\version.hpp')">D:\Dev\boost_1_78_0</BoostRoot>
+
+    <!--
+      Boost's prebuilt libraries. Boost lays these out as lib<bitness>-msvc-<toolset>, and
+      boost's own auto-linking picks the library name from the compiler version, so this
+      has to match the PlatformToolset the project builds with:
+
+        v140 (VS2015) -> 14.0      v143 (VS2022) -> 14.3
+
+      The x64 configurations build with v143 (see Custom.vcxproj), because RmlUi requires
+      a C++17 compiler and v140 cannot provide one. Override BoostToolsetTag if you point
+      BoostRoot at a boost built for a different toolset.
+    -->
+    <BoostToolsetTag Condition="'$(BoostToolsetTag)' == ''">14.3</BoostToolsetTag>
+    <BoostLibDir Condition="'$(BoostLibDir)' == '' And '$(Platform)' == 'x64'">$(BoostRoot)\lib64-msvc-$(BoostToolsetTag)</BoostLibDir>
+    <BoostLibDir Condition="'$(BoostLibDir)' == '' And '$(Platform)' == 'Win32'">$(BoostRoot)\lib32-msvc-$(BoostToolsetTag)</BoostLibDir>
+
+    <!--
+      Empty by default, and only needed when building with v140.
+
+      The v140 (VS2015) compiler predates intrinsics the current Windows SDK's headers
+      use: 10.0.26100's <wchar.h> calls _mm_loadu_si64, and v140 fails with "identifier
+      not found" before compiling a line of our own code. Putting an older UCRT include
+      directory FIRST on the include path makes the old headers win.
+
+      The project used to carry that directory as an unexplained absolute path, which is
+      why it read as dead weight and was briefly removed; it is not dead, it is what
+      made a v140 build work against a modern SDK at all.
+
+      The x64 configurations now build with v143, which needs none of this. Set
+      UcrtCompatVersion to an installed SDK version if you ever move a configuration
+      back to v140.
+    -->
+    <UcrtCompatVersion Condition="'$(UcrtCompatVersion)' == ''"></UcrtCompatVersion>
+    <UcrtCompatIncludeDir Condition="'$(UcrtCompatIncludeDir)' == '' And '$(UcrtCompatVersion)' != '' And Exists('$(MSBuildProgramFiles32)\Windows Kits\10\Include\$(UcrtCompatVersion)\ucrt')">$(MSBuildProgramFiles32)\Windows Kits\10\Include\$(UcrtCompatVersion)\ucrt</UcrtCompatIncludeDir>
+
+    <!--
+      SQLite is vendored as the single-file amalgamation; see sqlite\README.md for the
+      version and how to update it. These options are set here rather than edited into
+      the vendored source so that replacing sqlite3.c does not lose them.
+    -->
+    <SqliteDir Condition="'$(SqliteDir)' == ''">$(MSBuildThisFileDirectory)sqlite</SqliteDir>
+    <SqliteCompileDefinitions Condition="'$(SqliteCompileDefinitions)' == ''">SQLITE_THREADSAFE=1;SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DQS=0;SQLITE_DEFAULT_MEMSTATUS=0;SQLITE_OMIT_DEPRECATED;SQLITE_OMIT_PROGRESS_CALLBACK</SqliteCompileDefinitions>
+
+    <!--
+      RmlUi and FreeType. Unlike Detours these are not committed (rmlui.lib is ~48 MB);
+      thirdparty\build_deps.cmd reproduces them, and thirdparty\README.md explains the
+      version pins and the two build settings that must match the hook (-T v143, /MD).
+    -->
+    <RmlUiPrefixDir Condition="'$(RmlUiPrefixDir)' == ''">$(MSBuildThisFileDirectory)thirdparty\build\prefix</RmlUiPrefixDir>
+    <RmlUiIncludeDir Condition="'$(RmlUiIncludeDir)' == ''">$(RmlUiPrefixDir)\include</RmlUiIncludeDir>
+    <RmlUiLibDir Condition="'$(RmlUiLibDir)' == ''">$(RmlUiPrefixDir)\lib</RmlUiLibDir>
+
+    <!-- Detours is vendored in the repo, so this is relative and needs no configuration. -->
+    <DetoursRoot Condition="'$(DetoursRoot)' == ''">$(MSBuildThisFileDirectory)Detours-master</DetoursRoot>
+    <DetoursIncludeDir Condition="'$(DetoursIncludeDir)' == ''">$(DetoursRoot)\src</DetoursIncludeDir>
+    <DetoursLibDir Condition="'$(DetoursLibDir)' == '' And '$(Platform)' == 'x64'">$(DetoursRoot)\x64</DetoursLibDir>
+    <DetoursLibDir Condition="'$(DetoursLibDir)' == '' And '$(Platform)' == 'Win32'">$(DetoursRoot)\x86</DetoursLibDir>
+  </PropertyGroup>
+
+  <!--
+    Checked when a build actually runs, not while properties are being evaluated, so that
+    loading the project in an IDE or querying it does not fail on a machine without boost.
+    The message names the fix; the alternative is a wall of "cannot open include file
+    'boost/property_tree/ptree.hpp'" that does not say where boost was looked for.
+  -->
+  <Target Name="VerifyDependencies" BeforeTargets="ClCompile"
+          Condition="'$(Platform)' == 'x64'">
+    <Error Condition="!Exists('$(RmlUiLibDir)\rmlui.lib')"
+           Text="RmlUi was not found at '$(RmlUiLibDir)'. Run HookDll\thirdparty\build_deps.cmd once to build it (see HookDll\thirdparty\README.md)." />
+  </Target>
+
+  <Target Name="VerifyBoostRoot" BeforeTargets="ClCompile">
+    <Error Condition="'$(BoostRoot)' == ''"
+           Text="boost was not found. Set the BOOST environment variable to your boost root (the folder containing the 'boost' directory), or pass /p:BoostRoot=&lt;path&gt;." />
+    <Error Condition="!Exists('$(BoostRoot)\boost\version.hpp')"
+           Text="BoostRoot is '$(BoostRoot)' but '$(BoostRoot)\boost\version.hpp' does not exist. Point BOOST or /p:BoostRoot at the boost root, not at its parent." />
+  </Target>
+
+</Project>

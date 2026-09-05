@@ -68,6 +68,19 @@
     <ClCompile Include="GetPrivateStash.cpp" />
     <ClCompile Include="InventorySack_AddItem.cpp" />
     <ClCompile Include="stdafx.cpp" />
+    <!--
+      The vendored SQLite amalgamation. It is C, not C++, so it must not use the
+      project's C++ precompiled header. Its warnings are the upstream project's to
+      care about, not ours, so they are turned down rather than left to bury our own.
+      Build options come from SqliteCompileDefinitions in ..\Directory.Build.props.
+    -->
+    <ClCompile Include="$(SqliteDir)\sqlite3.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>$(SqliteCompileDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
@@ -97,13 +110,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-playtest|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
@@ -126,7 +139,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
@@ -165,55 +178,55 @@
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>n:\boost_1_61_0;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA;$(IncludePath)</IncludePath>
-    <LibraryPath>n:\boost_1_61_0\lib32-msvc-14.0;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>C:\Program Files (x86)\Windows Kits\10\Include\10.0.20348.0\um;D:\Programs\boost_1_78_0;C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.30.30705\atlmfc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.20348.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.10240.0\ucrt;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\atlmfc\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Programs\boost_1_78_0\lib64-msvc-14.0;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\atlmfc\lib\amd64;C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.30.30705\atlmfc\lib\x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>n:\boost_1_61_0;..\Detours-master\src;..\;$(IncludePath)</IncludePath>
-    <LibraryPath>n:\boost_1_61_0\lib32-msvc-14.0;..\Detours-master\x86;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>ItemAssistantHook_x86</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-playtest|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>n:\boost_1_61_0;..\Detours-master\src;..\;$(IncludePath)</IncludePath>
-    <LibraryPath>n:\boost_1_61_0\lib32-msvc-14.0;..\Detours-master\x86;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>ItemAssistantHook_x86</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>
     </LinkIncremental>
-    <IncludePath>D:\Programs\boost_1_78_0;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\atlmfc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.20348.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.10240.0\ucrt;..\Detours-master\src;..\;C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.30.30705\atlmfc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.20348.0\ucrt;$(BOOST);D:\Dev\boost_1_78_0;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Programs\boost_1_78_0\lib64-msvc-14.0;..\Detours-master\x64;$(BOOST)\lib64-msvc-14.0;C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.30.30705\atlmfc\lib\x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>ItemAssistantHook_x64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-playtest|x64'">
     <LinkIncremental />
-    <IncludePath>C:\Program Files (x86)\Windows Kits\10\Include\10.0.10240.0\ucrt;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\atlmfc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.20348.0\um;..\Detours-master\src;..\;C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.30.30705\atlmfc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.20348.0\ucrt;$(BOOST);D:\Programs\boost_1_78_0;$(IncludePath)</IncludePath>
-    <LibraryPath>..\Detours-master\x64;$(BOOST)\lib64-msvc-14.0;C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.30.30705\atlmfc\lib\x64;D:\Programs\boost_1_78_0\lib64-msvc-14.0;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>ItemAssistantHook_x64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Instaloot|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>N:\boost_1_61_0;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA\Detours;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA;$(IncludePath)</IncludePath>
-    <LibraryPath>N:\boost_1_61_0\lib32-msvc-14.0;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA\Detours\Release;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>$(ProjectName)-exp</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Instaloot|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>N:\boost_1_61_0;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA\Detours;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA;$(IncludePath);C:\Program Files (x86)\Windows Kits\10\Include\10.0.10240.0\ucrt</IncludePath>
-    <LibraryPath>N:\boost_1_61_0\lib32-msvc-14.0;C:\Users\STAT\Documents\Visual Studio 2012\Projects\IAGrim\IA\Detours\Release;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>$(ProjectName)-exp</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -231,7 +244,7 @@
     </ClCompile>
     <Link>
       <AdditionalDependencies>Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\Detours\Debug;D:\Program Files (x86)\boost\boost_1_47\lib\;D:\boost_1_58_0\lib32-msvc-11.0;..\..\Detours\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(DetoursLibDir);$(BoostLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
@@ -239,10 +252,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/MP %(AdditionalOptions)</AdditionalOptions>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\Detours-master\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RMLUI_STATIC_LIB;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;WIN32;_DEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -252,8 +266,8 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\Detours\Debug;D:\Programs\boost_1_78_0\lib64-msvc-14.0;..\Detours-master\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>rmlui.lib;freetype.lib;Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(DetoursLibDir);$(BoostLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
     </Link>
@@ -305,10 +319,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/MP %(AdditionalOptions)</AdditionalOptions>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RMLUI_STATIC_LIB;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;WIN32;NDEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>false</FunctionLevelLinking>
       <PrecompiledHeader>
@@ -318,7 +333,7 @@
       <SDLCheck>true</SDLCheck>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>rmlui.lib;freetype.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -328,10 +343,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release-playtest|x64'">
     <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/MP %(AdditionalOptions)</AdditionalOptions>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;PLAYTEST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RMLUI_STATIC_LIB;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;WIN32;NDEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;PLAYTEST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>false</FunctionLevelLinking>
       <PrecompiledHeader>
@@ -346,7 +362,7 @@
       <ExceptionHandling>Sync</ExceptionHandling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>rmlui.lib;freetype.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -382,7 +398,7 @@
       <AdditionalOptions>/MP %(AdditionalOptions)</AdditionalOptions>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;INSTALOOT_ENABLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RMLUI_STATIC_LIB;WIN32;NDEBUG;_WINDOWS;_USRDLL;CUSTOM_EXPORTS;INSTALOOT_ENABLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader>
@@ -391,7 +407,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>rmlui.lib;freetype.lib;Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>

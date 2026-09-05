@@ -1,0 +1,11 @@
+# Third-party source trees and their build output.
+#
+# Unlike Detours (whose 0.6 MB x64\detours.lib is committed), these are not committed:
+# rmlui.lib alone is ~48 MB. They are reproduced instead by running build_deps.cmd,
+# which pins the versions and the two build settings that must not drift.
+#
+# A fresh clone therefore needs one run of:  HookDll\thirdparty\build_deps.cmd
+
+RmlUi/
+freetype/
+build/

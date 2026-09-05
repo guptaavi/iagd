@@ -17,6 +17,7 @@
 #include "SetHardcore.h"
 #include "SettingsReader.h"
 #include "CrashReporter.h"
+#include <RmlUi/Core/Core.h>
 
 /// The log is constructed on first use rather than as a namespace-scope global.
 ///
@@ -480,6 +481,11 @@ static bool GameStateExportsResolved() {
 int ProcessAttach(HINSTANCE _hModule) {
 	//GetProductAndVersion();
 	LogToFile(LogLevel::INFO, std::string("DLL Compiled: ") + std::string(__DATE__) + std::string(" ") + std::string(__TIME__));
+
+	// Also the one thing that forces RmlUi to actually be linked in. Until the overlay
+	// exists there is no other call into it, and a static library nothing references is
+	// silently dropped -- which would make "it links" prove nothing.
+	LogToFile(LogLevel::INFO, std::string("RmlUi: ") + Rml::GetVersion());
 	LogToFile(LogLevel::INFO, L"Attatching to process..");
 
 	// Before anything else, and in particular before g_isRunningInWine is set: a refused attach
