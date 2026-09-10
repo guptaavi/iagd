@@ -50,6 +50,17 @@
     <ClInclude Include="GetPrivateStash.h" />
     <ClInclude Include="InventorySack_AddItem.h" />
     <ClInclude Include="MessageType.h" />
+    <ClInclude Include="OverlayHost.h" />
+    <ClInclude Include="OverlayInput.h" />
+    <ClInclude Include="OverlayUi.h" />
+    <ClInclude Include="OverlaySearch.h" />
+    <ClInclude Include="OverlayShell.h" />
+    <ClInclude Include="OverlayTransfer.h" />
+    <ClInclude Include="GameEngineUpdate.h" />
+    <ClInclude Include="ItemIcons.h" />
+    <ClInclude Include="ItemSearch.h" />
+    <ClInclude Include="ReplicaText.h" />
+    <ClInclude Include="SqliteDb.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Vec3f.h" />
     <ClInclude Include="VTableDispatch.h" />
@@ -67,6 +78,17 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="GetPrivateStash.cpp" />
     <ClCompile Include="InventorySack_AddItem.cpp" />
+    <ClCompile Include="OverlayHost.cpp" />
+    <ClCompile Include="OverlayInput.cpp" />
+    <ClCompile Include="OverlayUi.cpp" />
+    <ClCompile Include="OverlaySearch.cpp" />
+    <ClCompile Include="OverlayShell.cpp" />
+    <ClCompile Include="OverlayTransfer.cpp" />
+    <ClCompile Include="GameEngineUpdate.cpp" />
+    <ClCompile Include="ItemIcons.cpp" />
+    <ClCompile Include="ItemSearch.cpp" />
+    <ClCompile Include="ReplicaText.cpp" />
+    <ClCompile Include="SqliteDb.cpp" />
     <ClCompile Include="stdafx.cpp" />
     <!--
       The vendored SQLite amalgamation. It is C, not C++, so it must not use the
@@ -80,6 +102,29 @@
       <PreprocessorDefinitions>$(SqliteCompileDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      RmlUi's renderer and platform backends. RmlUi ships these as sample code that each
+      application copies rather than as part of the library, so they are compiled here
+      rather than linked from rmlui.lib. They are used unmodified; OverlayUi.cpp adapts
+      them by subclassing. thirdparty\build_deps.cmd stages them into RmlUiBackendsDir.
+
+      Their warnings belong to the upstream project rather than to this one, so they are
+      turned down here instead of being left to bury ours.
+    -->
+    <ClCompile Include="$(RmlUiBackendsDir)\RmlUi_Renderer_DX11.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <SDLCheck>false</SDLCheck>
+    </ClCompile>
+    <ClCompile Include="$(RmlUiBackendsDir)\RmlUi_Platform_Win32.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <SDLCheck>false</SDLCheck>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -183,7 +228,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <IncludePath>$(RmlUiIncludeDir);$(RmlUiBackendsDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
     <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -205,13 +250,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>
     </LinkIncremental>
-    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <IncludePath>$(RmlUiIncludeDir);$(RmlUiBackendsDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
     <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>ItemAssistantHook_x64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-playtest|x64'">
     <LinkIncremental />
-    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <IncludePath>$(RmlUiIncludeDir);$(RmlUiBackendsDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
     <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>ItemAssistantHook_x64</TargetName>
   </PropertyGroup>
@@ -225,7 +270,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Instaloot|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(RmlUiIncludeDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
+    <IncludePath>$(RmlUiIncludeDir);$(RmlUiBackendsDir);$(UcrtCompatIncludeDir);$(SqliteDir);$(BoostRoot);$(DetoursIncludeDir);..;$(IncludePath)</IncludePath>
     <LibraryPath>$(RmlUiLibDir);$(BoostLibDir);$(DetoursLibDir);$(LibraryPath)</LibraryPath>
     <TargetName>$(ProjectName)-exp</TargetName>
   </PropertyGroup>
@@ -266,7 +311,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rmlui.lib;freetype.lib;Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3dcompiler.lib;dxguid.lib;rmlui.lib;freetype.lib;Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(DetoursLibDir);$(BoostLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
@@ -333,7 +378,7 @@
       <SDLCheck>true</SDLCheck>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rmlui.lib;freetype.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3dcompiler.lib;dxguid.lib;rmlui.lib;freetype.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -362,7 +407,7 @@
       <ExceptionHandling>Sync</ExceptionHandling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rmlui.lib;freetype.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3dcompiler.lib;dxguid.lib;rmlui.lib;freetype.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -407,7 +452,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>rmlui.lib;freetype.lib;Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3dcompiler.lib;dxguid.lib;rmlui.lib;freetype.lib;Detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>

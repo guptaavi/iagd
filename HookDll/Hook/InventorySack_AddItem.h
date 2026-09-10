@@ -20,6 +20,53 @@ public:
 	/// <param name="isActive"></param>
 	void SetActive(bool isActive);
 
+	/// <summary>
+	/// Whether the player currently has the transfer stash open.
+	///
+	/// The in-game browser needs this: an item can only be created into a stash sack the
+	/// game has actually opened, so a transfer requested with it closed is held rather than
+	/// attempted. Tracked here because this class already hooks InventorySack::SetTransferOpen.
+	/// </summary>
+	static bool IsTransferStashOpen() { return m_isTransferStashOpen; }
+
+	/// <summary>
+	/// The stash sack the client is configured to deposit into, or null when the game is not
+	/// in a state to have one. GAME THREAD ONLY.
+	///
+	/// Public because the in-game browser places items into the same sack, by the same rule,
+	/// and two answers to "which stash tab" would be one too many.
+	/// </summary>
+	static GAME::InventorySack* GetSackToDepositTo(GAME::GameEngine* gameEngine);
+
+	/// <summary>
+	/// The game's own "find a free slot" and "put it there" calls, as resolved by this
+	/// class at attach. Exposed so the in-game browser places an item through exactly the
+	/// path the client's deposit already uses, rather than resolving its own copies that
+	/// could drift out of step after a game patch. Null until EnableHook has run.
+	/// </summary>
+	static bool PlaceInSack(void* sack, GAME::Item* item, GAME::Rect* position) {
+		if (dll_InventorySack_FindNextPosition == nullptr || dll_InventorySack_AddItem_Vec2 == nullptr) {
+			return false;
+		}
+
+		if (!dll_InventorySack_FindNextPosition(sack, item, position, true)) {
+			return false;
+		}
+
+		dll_InventorySack_AddItem_Vec2(sack, (void*)position, item, false);
+		return true;
+	}
+
+	/// Whether the two calls above resolved. False means no transfer can be attempted.
+	static bool CanPlaceItems() {
+		return dll_InventorySack_FindNextPosition != nullptr && dll_InventorySack_AddItem_Vec2 != nullptr;
+	}
+
+	/// Shows a message in the game's own cinematic-text banner, rate limited to one every
+	/// three seconds. The in-game browser reports its transfers the same way the client's
+	/// deposit does, so the player sees one kind of message rather than two.
+	static void ShowMessage(std::wstring header, std::wstring body) { DisplayMessage(header, body); }
+
 private:
 	struct Vec2f {
 		float x,y;
@@ -87,7 +134,6 @@ private:
 	static void DisplayMessage(std::wstring, std::wstring);
 	static bool IsRelevant(const GAME::ItemReplicaInfo& item);
 	static bool IsSackToLootFrom(void* stash, GAME::GameEngine* gameEngine);
-	static GAME::InventorySack* GetSackToDepositTo(GAME::GameEngine* gameEngine);
 	static GAME::ItemReplicaInfo* ReadReplicaInfo(const std::wstring& filename);
 
 

@@ -79,6 +79,14 @@
     <RmlUiIncludeDir Condition="'$(RmlUiIncludeDir)' == ''">$(RmlUiPrefixDir)\include</RmlUiIncludeDir>
     <RmlUiLibDir Condition="'$(RmlUiLibDir)' == ''">$(RmlUiPrefixDir)\lib</RmlUiLibDir>
 
+    <!--
+      RmlUi's renderer and platform backends are sample code rather than part of the
+      library, so CMake does not install them; build_deps.cmd stages the two the hook uses
+      here. They are compiled into the DLL unmodified and adapted by subclassing in
+      OverlayUi.cpp, which is what design.md means by "RmlUi_Renderer_DX11 used unmodified".
+    -->
+    <RmlUiBackendsDir Condition="'$(RmlUiBackendsDir)' == ''">$(RmlUiPrefixDir)\backends</RmlUiBackendsDir>
+
     <!-- Detours is vendored in the repo, so this is relative and needs no configuration. -->
     <DetoursRoot Condition="'$(DetoursRoot)' == ''">$(MSBuildThisFileDirectory)Detours-master</DetoursRoot>
     <DetoursIncludeDir Condition="'$(DetoursIncludeDir)' == ''">$(DetoursRoot)\src</DetoursIncludeDir>
@@ -96,6 +104,8 @@
           Condition="'$(Platform)' == 'x64'">
     <Error Condition="!Exists('$(RmlUiLibDir)\rmlui.lib')"
            Text="RmlUi was not found at '$(RmlUiLibDir)'. Run HookDll\thirdparty\build_deps.cmd once to build it (see HookDll\thirdparty\README.md)." />
+    <Error Condition="!Exists('$(RmlUiBackendsDir)\RmlUi_Renderer_DX11.cpp')"
+           Text="RmlUi's backends were not staged at '$(RmlUiBackendsDir)'. Re-run HookDll\thirdparty\build_deps.cmd; a prefix built before the backends step existed will not have them." />
   </Target>
 
   <Target Name="VerifyBoostRoot" BeforeTargets="ClCompile">

@@ -44,6 +44,19 @@ if errorlevel 1 exit /b 1
 %CMAKE% --build "%HERE%build\rmlui" --config Release --target install
 if errorlevel 1 exit /b 1
 
+rem The two backend files the hook compiles itself. RmlUi's CMake install stages only the
+rem library and its public headers; the backends are sample code that each application is
+rem expected to take a copy of. Staging them next to the installed headers keeps the hook
+rem project pointing at one reproducible location (build\prefix) instead of reaching into
+rem the gitignored clone. They are used unmodified -- see HookDll\Hook\OverlayUi.cpp for
+rem the subclassing that adapts them to a hook rather than an application.
+echo === Backends ===
+if not exist "%HERE%build\prefix\backends" mkdir "%HERE%build\prefix\backends"
+for %%F in (RmlUi_Renderer_DX11.cpp RmlUi_Renderer_DX11.h RmlUi_Platform_Win32.cpp RmlUi_Platform_Win32.h RmlUi_Include_Windows.h) do (
+  copy /Y "%HERE%RmlUi\Backends\%%F" "%HERE%build\prefix\backends\%%F" >nul
+  if errorlevel 1 exit /b 1
+)
+
 echo.
 echo === Built into %HERE%build\prefix ===
 dir /b "%HERE%build\prefix\lib"

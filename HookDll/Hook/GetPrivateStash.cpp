@@ -8,6 +8,7 @@
 #include <codecvt> // wstring_convert
 #include "Logger.h"
 #include "GrimTypes.h"
+#include "OverlayHost.h"
 
 HANDLE GetPrivateStash::m_hEvent;
 DataQueue* GetPrivateStash::m_dataQueue;
@@ -54,6 +55,14 @@ void* __stdcall GetPrivateStash::HookedMethod64(void* This) {
 	try {
 		// Capture the private stash inventory sack pointer for instaloot; stash open/close status is no longer reported.
 		privateStashSack = v;
+
+		// A second chance for the overlay to say it is unavailable, and the better one: this
+		// fires when the player opens their stash, which is when they would go looking for
+		// the in-game browser. The world-load hook that also calls this cannot fire in a
+		// session where the DLL attached to a world that was already loaded, because the
+		// game had already set the world up by then. Says nothing on a supported renderer,
+		// and nothing after it has been said once.
+		OverlayHost::ShowUnavailableNoticeOnce();
 	}
 	catch (std::exception& ex) {
 		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;

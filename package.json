@@ -1,0 +1,15 @@
+{
+  "name": "iagrim-openspec",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tooling-only manifest. Pins the OpenSpec CLI used to manage openspec/ specs and changes. Not part of the .NET build.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "openspec": "openspec"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "^1.8.0"
+  }
+}

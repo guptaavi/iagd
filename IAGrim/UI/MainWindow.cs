@@ -53,6 +53,8 @@ namespace IAGrim.UI {
 
         private CsvFileMonitor? _csvFileMonitor = new CsvFileMonitor();
         private CsvFileMonitor? _replicaCsvFileMonitor = new CsvFileMonitor();
+        private CsvFileMonitor? _journalFileMonitor = new CsvFileMonitor();
+        private TransferJournalService? _transferJournalService;
         private ItemReplicaRequesterService? _itemReplicaService;
         private ItemStatPrecomputeService? _itemStatPrecomputeService;
 
@@ -349,6 +351,12 @@ namespace IAGrim.UI {
 
             _replicaCsvFileMonitor?.Dispose();
             _replicaCsvFileMonitor = null;
+
+            _journalFileMonitor?.Dispose();
+            _journalFileMonitor = null;
+
+            _transferJournalService?.Dispose();
+            _transferJournalService = null;
 
             _csvParsingService?.Dispose();
             _csvParsingService = null;
@@ -665,6 +673,17 @@ namespace IAGrim.UI {
 
             searchController.OnSearch += (o, args) => backupService.OnSearch();
 
+            // Before the search window, which publishes the collection as it is constructed.
+            // An item handed to the player in-game during a previous session has to be gone from
+            // the first list they see: if it is still listed they can transfer it again, and then
+            // they have two.
+            _transferJournalService = new TransferJournalService(playerItemDao);
+            _transferJournalService.OnItemsRemoved += (_, arg) => {
+                _webSocketSyncService?.SendDeletions(arg.CloudIds);
+                _searchWindow?.UpdateListViewDelayed();
+            };
+            _transferJournalService.ProcessOutstanding();
+
             _searchWindow = new SplitSearchWindow(_cefBrowserHandler.BrowserControl!, SetFeedback, playerItemDao, searchController, itemTagDao, settingsService);
             UIHelper.AddAndShow(_searchWindow, searchPanel);
 
@@ -806,6 +825,14 @@ namespace IAGrim.UI {
             _transferController.OnItemsTransferredToGame += (_, arg) => {
                 _webSocketSyncService?.SendDeletions(arg.CloudIds);
             };
+
+            _journalFileMonitor!.OnModified += (_, arg) => {
+                if (arg is CsvFileMonitor.CsvEvent journalEvent) {
+                    _transferJournalService?.Queue(journalEvent.Filename);
+                }
+            };
+            _journalFileMonitor.StartMonitoring(GlobalPaths.TransferJournalLocation, "*.txt");
+            _transferJournalService!.Start();
 
             _csvFileMonitor.StartMonitoring(GlobalPaths.CsvLocationIngoing, "*.csv");
             _replicaCsvFileMonitor.StartMonitoring(GlobalPaths.CsvReplicaReadLocation, "*.json");

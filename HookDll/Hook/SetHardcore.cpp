@@ -6,6 +6,7 @@
 #include "SetHardcore.h"
 #include "Exports.h"
 #include "Logger.h"
+#include "OverlayHost.h"
 #include <codecvt> // wstring_convert
 
 SetHardcore* SetHardcore::g_self;
@@ -37,6 +38,13 @@ void SetHardcore::DisableHook() {
 void* __fastcall SetHardcore::HookedMethod(void* This, bool isHardcore) {
 	try {
 		g_self->TransferData(sizeof(isHardcore), (char*)&isHardcore);
+
+		// The game sets this as a world is created, on the game's own thread, which makes it
+		// the moment a player has arrived somewhere the in-game browser would be offered.
+		// The browser cannot say this for itself on a renderer it does not support, because
+		// there it installs no hook at all and has no thread of the game's to speak from.
+		// Says nothing on a supported renderer, and nothing after it has been said once.
+		OverlayHost::ShowUnavailableNoticeOnce();
 	}
 	catch (std::exception& ex) {
 		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;

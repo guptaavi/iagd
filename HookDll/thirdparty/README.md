@@ -22,8 +22,14 @@ git clone --depth 1 --branch VER-2-14-1   https://gitlab.freedesktop.org/freetyp
 build_deps.cmd
 ```
 
-Produces `build\prefix\{include,lib}`, which `HookDll\Directory.Build.props` points at
-via `RmlUiPrefixDir`.
+Produces `build\prefix\{include,lib,backends}`, which `HookDll\Directory.Build.props`
+points at via `RmlUiPrefixDir`.
+
+`backends` is staged by the script rather than by CMake. RmlUi treats its renderer and
+platform backends as sample code that each application copies, so `--target install` does
+not carry them; the hook compiles `RmlUi_Renderer_DX11.cpp` and `RmlUi_Platform_Win32.cpp`
+itself. They are used unmodified and adapted by subclassing in `HookDll\Hook\OverlayUi.cpp`.
+A `build\prefix` produced before that step existed will be missing them — re-run the script.
 
 ## Two settings that must not change
 

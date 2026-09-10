@@ -17,6 +17,8 @@
 #include "SetHardcore.h"
 #include "SettingsReader.h"
 #include "CrashReporter.h"
+#include "OverlayHost.h"
+#include "OverlayInput.h"
 #include <RmlUi/Core/Core.h>
 
 /// The log is constructed on first use rather than as a namespace-scope global.
@@ -433,7 +435,20 @@ void ReportCancelledInjection() {
 		LOG(L"After SendMessage error code is " << lastErrorCode);
 }
 
+/// Hooks the DLL cannot do its job without. A failure here is a failed attach.
 std::vector<BaseMethodHook*> hooks;
+
+/// <summary>
+/// Hooks whose absence is a supported configuration rather than a failure: the in-game
+/// browser, which only exists on the Direct3D 11 renderer.
+///
+/// Kept separate so the two sets are enabled and torn down on their own terms. The optional
+/// ones are enabled last and disabled first, which is what gives the detach the order it
+/// needs: input handed back to the game, the overlay closed and its worker stopped, and only
+/// then the hooks taken out from underneath the frames that were using them.
+/// </summary>
+std::vector<BaseMethodHook*> optionalHooks;
+
 std::wstring GetIagdFolder();
 
 /// Refuse to initialise if this hook is already loaded in the target process.
@@ -597,12 +612,72 @@ int ProcessAttach(HINSTANCE _hModule) {
 	if (listener != nullptr) {
 		hooks.push_back(listener);
 	}
-	// hooks.push_back(new GameEngineUpdate(&g_dataQueue, g_hEvent));	 // Debug/test only
+	
+	// The overlay goes in a second list, and the difference between the two is not cosmetic.
+	// Everything above is required: if item capture cannot install, the attach has failed.
+	// The overlay is optional -- it depends on which renderer the process loaded and finds
+	// nothing on a Direct3D 9 launch -- and its absence must leave capture and deposit
+	// installed and the attach reported as successful.
+	LogToFile(LogLevel::INFO, L"Preparing overlay host..");
 
-	LogToFile(LogLevel::INFO, L"Starting hook enabling.. " + std::to_wstring(hooks.size()) + L" hooks.");
+	// Whether the browser may install at all, and which key opens it.
+	//
+	// Absent from settings.json, the browser is on under Windows and off under Wine. The
+	// Wine path is unproven end to end -- the overlay draws through Direct3D 11, which under
+	// Wine means DXVK translating to Vulkan -- and defaulting it off there means a Linux
+	// player gets exactly the DLL they have today unless they ask for more. Setting
+	// "local.overlayEnabled" to true is how they ask.
+	//
+	// A malformed settings.json must not stop the rest of the hooks from installing, so the
+	// defaults stand if reading it throws.
+	bool isOverlayEnabled = !g_isRunningInWine;
+	try {
+		SettingsReader overlaySettings;
+		isOverlayEnabled = overlaySettings.GetIsOverlayEnabled(!g_isRunningInWine);
+		OverlayInput::SetToggleKey(overlaySettings.GetOverlayHotkey());
+	}
+	catch (...) {
+		LogToFile(LogLevel::WARNING, L"Failed to read the overlay settings, using the defaults.");
+	}
+
+	if (!isOverlayEnabled) {
+		LogToFile(LogLevel::INFO, g_isRunningInWine
+			? L"In-game browser: disabled under Wine. Set \"local.overlayEnabled\": true in settings.json to try it."
+			: L"In-game browser: disabled by \"local.overlayEnabled\" in settings.json.");
+	}
+	else {
+		// Input first: the overlay host checks whether input can be withheld before it offers
+		// itself, so an overlay is never opened over a game that still responds to clicks.
+		optionalHooks.push_back(new OverlayInput(&g_dataQueue, g_hEvent));
+		optionalHooks.push_back(new OverlayHost(&g_dataQueue, g_hEvent));
+
+		// Last, so that on detach it comes out first among the overlay's hooks and before the
+		// capture hook, which detours the same GameEngine::Update. Detours chains detours on
+		// one function and expects them removed in the reverse of the order they went on.
+		optionalHooks.push_back(new GameEngineUpdate(&g_dataQueue, g_hEvent));
+	}
+
+	LogToFile(LogLevel::INFO, L"Starting hook enabling.. " + std::to_wstring(hooks.size()) + L" required, "
+		+ std::to_wstring(optionalHooks.size()) + L" optional.");
 	for (unsigned int i = 0; i < hooks.size(); i++) {
 		LogToFile(LogLevel::INFO, L"Enabling hook..");
 		hooks[i]->EnableHook();
+	}
+
+	// An optional hook that throws is skipped rather than allowed to take the attach with it.
+	// Each of them already reports an unavailable renderer or an unresolved export itself and
+	// returns quietly; this catch is for the case none of them anticipated.
+	for (unsigned int i = 0; i < optionalHooks.size(); i++) {
+		try {
+			LogToFile(LogLevel::INFO, L"Enabling optional hook..");
+			optionalHooks[i]->EnableHook();
+		}
+		catch (const std::exception& ex) {
+			LogToFile(LogLevel::WARNING, std::string("An optional hook could not be installed and was skipped: ") + ex.what());
+		}
+		catch (...) {
+			LogToFile(LogLevel::WARNING, L"An optional hook could not be installed and was skipped.");
+		}
 	}
 	LogToFile(LogLevel::INFO, L"Hooking complete..");
 
@@ -631,6 +706,16 @@ int ProcessDetach(HINSTANCE _hModule) {
 	if (listener != nullptr) {
 		listener->Stop();
 	}
+
+	// The overlay first, and in registration order: OverlayInput hands input back to the game
+	// and restores the window procedure, then OverlayHost closes the overlay, stops the search
+	// worker and takes its detour out. The other order would leave the game blind to its own
+	// input while the renderer hook was still being removed.
+	for (unsigned int i = 0; i < optionalHooks.size(); i++) {
+		optionalHooks[i]->DisableHook();
+		delete optionalHooks[i];
+	}
+	optionalHooks.clear();
 
 	for (unsigned int i = 0; i < hooks.size(); i++) {
 		hooks[i]->DisableHook();

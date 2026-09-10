@@ -66,6 +66,22 @@ namespace IAGrim.Utilities {
             }
         }
 
+        /// <summary>
+        /// Where the injected hook records items it has handed to the player in-game.
+        ///
+        /// One file per transfer, published atomically, and consumed by TransferJournalService.
+        /// It sits beside the CSV queues rather than inside one of them because it travels the
+        /// other way: those carry items into the collection, this carries the news that one has
+        /// left it.
+        /// </summary>
+        public static string TransferJournalLocation {
+            get {
+                string path = Path.Combine(CsvLocation, "journal");
+                Directory.CreateDirectory(path);
+                return path;
+            }
+        }
+
         public static string CsvLocationIngoing {
             get {
                 string path = Path.Combine(CsvLocation, "ingoing");

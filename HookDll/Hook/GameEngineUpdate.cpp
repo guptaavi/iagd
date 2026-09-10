@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include "MessageType.h"
 #include "GameEngineUpdate.h"
+#include "OverlayTransfer.h"
+#include "Logger.h"
 #include "Exports.h"
 
 
@@ -32,26 +34,23 @@ void GameEngineUpdate::DisableHook() {
 	Unhook((PVOID*)&originalMethod, HookedMethod);
 }
 
-//typedef bool(__thiscall* IsGameLoadingPtr)(void* This);
-//typedef bool(__thiscall* IsGameWaitingPtr)(void* This, bool);
-//IsGameLoadingPtr IsGameLoading = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameLoading@GameEngine@GAME@@QEBA_NXZ"));
-//IsGameLoadingPtr IsGameEngineOnline = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameEngineOnline@GameEngine@GAME@@QEBA_NXZ"));
-//IsGameWaitingPtr IsGameWaiting = IsGameWaitingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameWaiting@GameEngine@GAME@@QEAA_N_N@Z"));
-
-
 void* __fastcall GameEngineUpdate::HookedMethod(void* This, int v) {
+	// The game's own update first. An item created before it has ticked would be placed
+	// into a sack the game is about to walk, and the capture hook on the same function
+	// takes the same care.
 	void* r = g_self->originalMethod(This, v);
-	
 
-	//std::wofstream itemStatsfile;
-	//itemStatsfile.open("ItemStats.txt");
-	//itemStatsfile << "Dump_ItemStats()\n";
-	//itemStatsfile << "IsGameLoading " << (IsGameLoading(This) ? "true" : "false") << "\n";
-	//itemStatsfile << "IsGameEngineOnline " << (IsGameEngineOnline(This) ? "true" : "false") << "\n";
-	//itemStatsfile << "IsGameWaiting " << (IsGameWaiting(This, true) ? "true" : "false") << "\n";
-	//itemStatsfile.flush();
-
-	//itemStatsfile.close();
+	try {
+		// Cheap when there is nothing queued, which is almost always: one mutex and one
+		// empty check. Everything expensive is behind that.
+		OverlayTransfer::ProcessPending((GAME::GameEngine*)This);
+	}
+	catch (const std::exception& ex) {
+		LogToFile(LogLevel::FATAL, std::string("Overlay transfer tick: ") + ex.what());
+	}
+	catch (...) {
+		LogToFile(LogLevel::FATAL, "Overlay transfer tick: unknown error.");
+	}
 
 	return r;
 }
