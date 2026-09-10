@@ -507,6 +507,13 @@ void __fastcall OverlayHost::Hooked_PresentSurface(void* This, void* renderSurfa
                 }
             }
 
+            // Escape and the close button, which mean "shut it" rather than "toggle it".
+            // Consumed unconditionally so a request that arrives while the overlay is
+            // already closed is discarded rather than left to close the next session.
+            if (OverlayInput::TakeCloseRequests() > 0 && m_isVisible) {
+                m_isVisible = false;
+            }
+
             // The conditions can also stop holding under an overlay that is already up.
             if (m_isVisible && !CanBeOpen()) {
                 m_isVisible = false;

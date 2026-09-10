@@ -49,6 +49,9 @@ volatile long g_toggleKey = VK_F9;
 /// thread, so it is interlocked rather than merely volatile.
 volatile long g_togglePresses = 0;
 
+/// Close requests seen but not yet acted on. Same ownership as g_togglePresses.
+volatile long g_closeRequests = 0;
+
 BOOL CALLBACK FindMainWindow(HWND window, LPARAM out) {
     DWORD pid = 0;
     ::GetWindowThreadProcessId(window, &pid);
@@ -127,6 +130,14 @@ unsigned int OverlayInput::TakeTogglePresses() {
     return (unsigned int)::InterlockedExchange(&g_togglePresses, 0);
 }
 
+void OverlayInput::RequestClose() {
+    ::InterlockedIncrement(&g_closeRequests);
+}
+
+unsigned int OverlayInput::TakeCloseRequests() {
+    return (unsigned int)::InterlockedExchange(&g_closeRequests, 0);
+}
+
 bool OverlayInput::PopMessage(OverlayWindowMessage& out) {
     MessagePump& p = pump();
     std::lock_guard<std::mutex> guard(p.mutex);
@@ -183,6 +194,13 @@ LRESULT CALLBACK OverlayInput::Hooked_WndProc(HWND window, UINT message, WPARAM 
             // sees it through this path either.
             swallow = true;
         }
+        else if (m_isSuppressing && message == WM_KEYDOWN && (int)wParam == VK_ESCAPE) {
+            // Escape closes the overlay, the way it closes every other window in the game.
+            // It must not also reach the game, or closing the overlay would open the game
+            // menu behind it in the same keystroke.
+            RequestClose();
+            swallow = true;
+        }
         else if (m_isSuppressing && IsOverlayInputMessage(message)) {
             MessagePump& p = pump();
             std::lock_guard<std::mutex> guard(p.mutex);
@@ -213,6 +231,11 @@ LRESULT CALLBACK OverlayInput::Hooked_WndProc(HWND window, UINT message, WPARAM 
         // The key that releases the toggle belongs to the overlay too, or the game sees a
         // release for a press it never got.
         if (message == WM_KEYUP && (int)wParam == ToggleKey()) {
+            swallow = true;
+        }
+
+        // Same for Escape: the game must not see a release for a press it never got.
+        if (m_isSuppressing && message == WM_KEYUP && (int)wParam == VK_ESCAPE) {
             swallow = true;
         }
     }

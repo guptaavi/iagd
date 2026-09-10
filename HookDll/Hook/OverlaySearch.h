@@ -53,6 +53,26 @@ struct OverlayItemDetail {
 typedef std::shared_ptr<OverlayItemDetail> OverlayItemDetailPtr;
 
 /// <summary>
+/// The stat text for every item currently on screen, so they can be read side by side.
+///
+/// The single-item detail above exists because only one item was ever being read. Showing
+/// stats on the cards themselves changes that: comparing two items means seeing both at
+/// once, which is how the client's own item grid works. This is still not "every match" --
+/// it is the visible page, which is why the shell pages the grid rather than rendering a
+/// thousand cards.
+/// </summary>
+struct OverlayPageDetails {
+    /// Which search these belong to. Rows for a page the player has already left are
+    /// dropped rather than written into whatever is on screen now.
+    unsigned long long generation = 0;
+
+    std::map<int64_t, std::vector<iagd::ReplicaRow>> byItem;
+    bool ok = false;
+};
+
+typedef std::shared_ptr<OverlayPageDetails> OverlayPageDetailsPtr;
+
+/// <summary>
 /// Runs the overlay's searches away from the frame.
 ///
 /// A search over a played account's database is tens of milliseconds of SQLite work, which
@@ -105,6 +125,18 @@ public:
 
     /// The newest finished detail, or null when nothing has finished since the last call.
     static OverlayItemDetailPtr TakeDetail();
+
+    /// <summary>
+    /// Asks for the stat rows of every item on the visible page, in one query.
+    ///
+    /// Posted after the page is drawn rather than as part of the search, so the grid
+    /// appears immediately and fills in its stats a moment later instead of waiting on a
+    /// second query before showing anything.
+    /// </summary>
+    static void SubmitPageDetails(const std::vector<int64_t>& playerItemIds, unsigned long long generation);
+
+    /// The newest finished page of stat rows, or null when there is none.
+    static OverlayPageDetailsPtr TakePageDetails();
 
     /// <summary>
     /// Reads everything the game needs to rebuild one item.

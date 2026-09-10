@@ -80,6 +80,19 @@ public:
     static unsigned int TakeTogglePresses();
 
     /// <summary>
+    /// Asks for the overlay to be closed, from anywhere.
+    ///
+    /// Separate from the toggle because closing must be unambiguous: Escape and the close
+    /// button both mean "shut it", never "open it if it happens to be shut". Counted and
+    /// interlocked for the same reason as the toggle -- the request arrives on the window
+    /// thread or the render thread and is consumed on the render thread.
+    /// </summary>
+    static void RequestClose();
+
+    /// How many close requests have arrived since this was last called, and resets it.
+    static unsigned int TakeCloseRequests();
+
+    /// <summary>
     /// The virtual-key code that opens and closes the overlay. Read once at attach from
     /// the client's settings.json, defaulting to F9.
     /// </summary>

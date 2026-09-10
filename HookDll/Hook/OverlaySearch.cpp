@@ -56,6 +56,13 @@ struct Worker {
     bool hasPendingTransfer = false;
     int64_t pendingTransferId = 0;
 
+    /// The visible page's items, whose stat rows are wanted together so they can be read
+    /// side by side. Overwritten rather than queued: the player has paged, and the stats
+    /// for the page they left are of no use.
+    bool hasPendingPageDetails = false;
+    std::vector<int64_t> pendingPageDetailIds;
+    unsigned long long pendingPageDetailGeneration = 0;
+
     std::atomic<unsigned long long> generation{0};
     std::atomic<unsigned long long> dataVersionChanges{0};
 
@@ -63,6 +70,7 @@ struct Worker {
     /// a second hand-rolled one.
     BaseDataQueue<OverlaySearchResultPtr> results;
     BaseDataQueue<OverlayItemDetailPtr> details;
+    BaseDataQueue<OverlayPageDetailsPtr> pageDetails;
     BaseDataQueue<std::shared_ptr<OverlayTransferRequest>> transfers;
 
     iagd::SqliteDb db;
@@ -172,6 +180,68 @@ void RunDetail(Worker& w, int64_t playerItemId) {
 }
 
 /// <summary>
+/// Reads the stat rows of a whole page of items in one query.
+///
+/// One query rather than one per item: a page is sixty items, and sixty round trips
+/// through SQLite for text that is all wanted at the same moment is sixty times the
+/// fixed cost for no benefit. Ordered by item and then by row id, so each item's rows
+/// arrive in the sequence the game emitted them -- a stat only makes sense under the
+/// header that introduces it.
+/// </summary>
+void RunPageDetails(Worker& w, const std::vector<int64_t>& ids, unsigned long long generation) {
+    OverlayPageDetailsPtr page(new OverlayPageDetails());
+    page->generation = generation;
+
+    if (ids.empty()) {
+        page->ok = true;
+        w.pageDetails.push(page);
+        return;
+    }
+
+    // The id list is built by this file from rows this file read, so it is a list of
+    // integers and not anything a player typed. Bound as text through the list parameter
+    // the wrapper already supports; SQLite compares them numerically against the column.
+    std::vector<std::string> idStrings;
+    idStrings.reserve(ids.size());
+    for (size_t i = 0; i < ids.size(); i++) {
+        idStrings.push_back(std::to_string(ids[i]));
+    }
+
+    // Every id asked for gets an entry, empty until the query fills it. An item with no
+    // stored stat text returns no rows at all, so without this the caller could not tell
+    // "this item has none" from "these have not arrived yet" -- and would have to render
+    // the same blank space for both.
+    for (size_t i = 0; i < ids.size(); i++) {
+        page->byItem[ids[i]];
+    }
+
+    iagd::SqliteQuery query(w.db);
+    query.SetParamList("ids", idStrings);
+
+    if (!query.Prepare(
+            "SELECT replica.playeritemid, row.Type, row.Text FROM ReplicaItemRow row"
+            " JOIN ReplicaItem2 replica ON replica.Id = row.replicaitemid"
+            " WHERE replica.playeritemid IN ( :ids )"
+            " ORDER BY replica.playeritemid, row.Id")) {
+        LogToFile(LogLevel::WARNING, "Overlay page details failed: " + query.LastError());
+        w.pageDetails.push(page);
+        return;
+    }
+
+    while (query.Step()) {
+        const int64_t itemId = query.GetInt64(0);
+
+        iagd::ReplicaRow row;
+        row.type = (int)query.GetInt64(1);
+        row.text = query.GetText(2);
+        page->byItem[itemId].push_back(row);
+    }
+
+    page->ok = true;
+    w.pageDetails.push(page);
+}
+
+/// <summary>
 /// Reads the columns the game needs to rebuild an item, in the shape ItemReplicaInfo
 /// wants them.
 ///
@@ -266,11 +336,15 @@ void WorkerMain() {
         int64_t detailId = 0;
         bool hasTransfer = false;
         int64_t transferId = 0;
+        bool hasPageDetails = false;
+        std::vector<int64_t> pageDetailIds;
+        unsigned long long pageDetailGeneration = 0;
 
         {
             std::unique_lock<std::mutex> lock(w.mutex);
             w.wakeUp.wait_for(lock, std::chrono::milliseconds(kIdlePollMilliseconds),
-                [&w] { return w.shouldStop || w.hasPendingRequest || w.hasPendingDetail || w.hasPendingTransfer; });
+                [&w] { return w.shouldStop || w.hasPendingRequest || w.hasPendingDetail
+                              || w.hasPendingTransfer || w.hasPendingPageDetails; });
 
             if (w.shouldStop) {
                 return;
@@ -296,6 +370,13 @@ void WorkerMain() {
                 transferId = w.pendingTransferId;
                 hasTransfer = true;
             }
+
+            if (w.hasPendingPageDetails) {
+                w.hasPendingPageDetails = false;
+                pageDetailIds = w.pendingPageDetailIds;
+                pageDetailGeneration = w.pendingPageDetailGeneration;
+                hasPageDetails = true;
+            }
         }
 
         try {
@@ -310,6 +391,13 @@ void WorkerMain() {
 
             if (hasDetail) {
                 RunDetail(w, detailId);
+            }
+
+            // After the single detail and before a new search: the page is already on
+            // screen and is waiting to be filled in, whereas a queued search is going to
+            // replace it anyway.
+            if (hasPageDetails && w.generation.load() == pageDetailGeneration) {
+                RunPageDetails(w, pageDetailIds, pageDetailGeneration);
             }
 
             if (hasWork) {
@@ -456,6 +544,29 @@ OverlayItemDetailPtr OverlaySearch::TakeDetail() {
     OverlayItemDetailPtr newest;
     while (!w.details.empty()) {
         newest = w.details.pop();
+    }
+
+    return newest;
+}
+
+void OverlaySearch::SubmitPageDetails(const std::vector<int64_t>& playerItemIds, unsigned long long generation) {
+    Worker& w = worker();
+
+    {
+        std::lock_guard<std::mutex> guard(w.mutex);
+        w.pendingPageDetailIds = playerItemIds;
+        w.pendingPageDetailGeneration = generation;
+        w.hasPendingPageDetails = true;
+    }
+    w.wakeUp.notify_all();
+}
+
+OverlayPageDetailsPtr OverlaySearch::TakePageDetails() {
+    Worker& w = worker();
+
+    OverlayPageDetailsPtr newest;
+    while (!w.pageDetails.empty()) {
+        newest = w.pageDetails.pop();
     }
 
     return newest;

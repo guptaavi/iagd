@@ -2,6 +2,7 @@
 #include "OverlayShell.h"
 #include "ItemIcons.h"
 #include "Logger.h"
+#include "OverlayInput.h"
 #include "OverlaySearch.h"
 #include "OverlayTransfer.h"
 #include "ReplicaText.h"
@@ -178,6 +179,15 @@ std::string Escape(const std::string& text) {
 /// The client's rarity names, which are the values stored in PlayerItem.Rarity rather than
 /// the words a player would use. Kept as the class name so the RCSS below reads the same
 /// way the WebUI's does.
+/// U+00B7 MIDDLE DOT, as a numeric character reference.
+///
+/// RmlUi's StringUtilities::DecodeRml resolves exactly four named entities -- &lt; &gt;
+/// &amp; &quot; -- plus numeric references. "&middot;" is not among them, so writing it
+/// put the letters of the entity on screen instead of a dot. A numeric reference is
+/// resolved, and unlike a literal character it keeps this file pure ASCII, so the bytes
+/// cannot change meaning with the compiler's source encoding.
+const char* const kMiddleDot = "&#183;";
+
 std::string RarityClass(const std::string& rarity) {
     if (rarity == "Yellow" || rarity == "Green" || rarity == "Blue" || rarity == "Epic" || rarity == "Legendary") {
         return "rarity-" + rarity;
@@ -209,12 +219,52 @@ struct ShellState {
     unsigned long scheduledAtTick = 0;
     bool hasScheduledSearch = false;
 
-    /// The stacks currently on screen, so a click can be resolved back to an item without
-    /// reading it out of the DOM.
+    /// The stacks the current search returned, so a click can be resolved back to an item
+    /// without reading it out of the DOM. Only a slice of these is on screen at a time.
     std::vector<std::vector<iagd::ItemSearchRow>> stacks;
     int selectedIndex = -1;
 
+    /// Base record -> bitmap path, for the current result.
+    std::map<std::string, std::string> icons;
+
+    /// Where the visible slice starts within `stacks`.
+    int viewOffset = 0;
+
+    /// Whether the database had more rows than the query's cap, so the count can say so.
+    bool lastWasTruncated = false;
+
+    /// Stat rows for the items on screen, keyed by player item id. Filled in a moment
+    /// after the cards appear. Kept across a refresh -- the key is the item, not the
+    /// position, so rows fetched before the refresh are still the right rows after it, and
+    /// keeping them is what stops the cards collapsing to bare names and expanding again.
+    std::map<int64_t, std::vector<iagd::ReplicaRow>> pageDetails;
+
     unsigned long long lastDataVersionChanges = 0;
+
+    /// A foreign write has been seen and a refresh is owed, once the writing stops. See
+    /// kRefreshQuietMilliseconds.
+    bool hasDeferredRefresh = false;
+    unsigned long refreshQuietUntilTick = 0;
+    unsigned long refreshDeferredSinceTick = 0;
+
+    /// Whether the search now in flight is a refresh of what is already on screen rather
+    /// than a new question from the player. A refresh keeps their place; a new question
+    /// starts at the top.
+    bool scheduledPreservesView = false;
+    bool preserveViewOnNextResult = false;
+
+    /// Where the results were scrolled to before a refresh rebuilt them, and how many more
+    /// frames to keep putting them back there. One assignment is not enough: replacing the
+    /// contents resets the offset, and so does each relayout that follows -- the stat rows
+    /// arriving from the worker change every card's height a frame or two later. So the
+    /// offset is re-applied until it sticks rather than once and hopefully.
+    float restoreScrollTop = 0.0f;
+    int restoreScrollFrames = 0;
+
+    /// What the scroll thumb was last set to, so an unchanged frame writes no properties.
+    float thumbHeight = -1.0f;
+    float thumbOffset = -1.0f;
+
     bool isDarkMode = false;
 };
 
@@ -229,10 +279,62 @@ const unsigned long kSearchDelayMilliseconds = 250;
 /// ItemSearch::MaxSearchResults, so a page never asks for more than one query's worth.
 const int kPageSize = iagd::ItemSearch::MaxSearchResults;
 
+/// How many cards are drawn at once. With the stats on the cards a card is tens of elements
+/// rather than four, so the whole database page cannot be drawn the way it could when a card
+/// was a name and a level. The client serves its own grid in batches of 64 for the same
+/// reason; this is the same idea with a round number.
+const int kCardsPerView = 60;
+
+/// <summary>
+/// How quiet the database has to go before a foreign write turns into a refresh.
+///
+/// PRAGMA data_version says "somebody committed", not "your results changed", and the
+/// client commits in bursts: a replica backfill writes twice a second for as long as it
+/// takes to walk the collection. Refreshing on each one re-ran the search several times a
+/// second, which read as flicker and made the list impossible to scroll or click. So a
+/// write starts a timer instead, and every further write restarts it -- a burst of a
+/// thousand commits costs one refresh, at the end.
+const unsigned long kRefreshQuietMilliseconds = 1500;
+
+/// The longest a refresh is put off while the client keeps writing. Without this, a backfill
+/// that runs for ten minutes would leave the overlay ten minutes stale, since it never goes
+/// quiet. With the view and the fetched stats both preserved across a refresh, one every
+/// fifteen seconds is not something the player sees.
+const unsigned long kRefreshMaximumDeferMilliseconds = 15000;
+
+/// A ceiling on the retained stat rows, since a refresh no longer clears them. Reached only
+/// after hundreds of refreshes; dropping the lot is fine because the next page re-fetches
+/// whatever it needs.
+const size_t kMaxCachedDetails = 4000;
+
+/// How many frames a refresh keeps re-asserting the scroll offset. Long enough to outlast
+/// the relayout caused by the page's stat rows arriving, short enough that a player who
+/// grabs the wheel in the same tenth of a second is not fought for long.
+const int kScrollRestoreFrames = 12;
+
 void ScheduleSearch() {
     ShellState& s = state();
     s.scheduledAtTick = ::GetTickCount() + kSearchDelayMilliseconds;
     s.hasScheduledSearch = true;
+    s.scheduledPreservesView = false;
+}
+
+/// <summary>
+/// Re-runs the current search because the database changed underneath it, keeping the
+/// player where they were: same page, same selection, same stats already on the cards.
+/// </summary>
+void ScheduleRefresh() {
+    ShellState& s = state();
+
+    // A question the player has already asked for wins: they are typing, and what they are
+    // typing matters more than what the client just wrote.
+    if (s.hasScheduledSearch && !s.scheduledPreservesView) {
+        return;
+    }
+
+    s.scheduledAtTick = ::GetTickCount() + kSearchDelayMilliseconds;
+    s.hasScheduledSearch = true;
+    s.scheduledPreservesView = true;
 }
 
 float ToLevel(const std::string& text) {
@@ -295,9 +397,10 @@ void SetStatus(const std::string& text) {
     }
 }
 
-void RunSearch() {
+void RunSearch(bool preserveView = false) {
     ShellState& s = state();
     s.hasScheduledSearch = false;
+    s.preserveViewOnNextResult = preserveView;
 
     if (!OverlaySearch::IsReady()) {
         SetStatus("The item database is not available.");
@@ -305,14 +408,84 @@ void RunSearch() {
     }
 
     OverlaySearch::Submit(BuildRequest(), s.skip, false);
-    SetStatus("Searching...");
+
+    // Not on a refresh: the count under the grid is still true until the new one arrives,
+    // and replacing it with "Searching..." twice a minute is the flicker in miniature.
+    if (!preserveView) {
+        SetStatus("Searching...");
+    }
 }
 
 // ---------------------------------------------------------------------------------------
 // Rendering the model into the document
 // ---------------------------------------------------------------------------------------
 
-void RenderResults(const OverlaySearchResult& result) {
+/// <summary>
+/// Renders one item's stat rows as the client's item grid does: each row keeps its own type
+/// as a class for the RCSS to colour by, and the "^" codes inside it become spans.
+///
+/// Shared by the cards and the detail pane so an item cannot read differently in the two
+/// places. `compact` drops the blank spacer rows, which are worth the vertical space in a
+/// pane devoted to one item but not in a grid meant for comparing many.
+/// </summary>
+void AppendReplicaRows(std::ostringstream& rml, const std::vector<iagd::ReplicaRow>& rows, bool compact) {
+    for (size_t i = 0; i < rows.size(); i++) {
+        const iagd::ReplicaRow& row = rows[i];
+
+        if (iagd::ReplicaSections::IsBlank(row)) {
+            if (!compact) {
+                rml << "<div class=\"replica-blank\"/>";
+            }
+            continue;
+        }
+
+        rml << "<div class=\"replica-row replica-type-" << row.type << "\">";
+
+        for (const iagd::TextRun& run : iagd::ReplicaText::Parse(row.text)) {
+            if (run.text.empty()) {
+                continue;
+            }
+
+            if (run.code == 0) {
+                rml << Escape(run.text);
+            }
+            else {
+                rml << "<span class=\"replica-letter-" << run.code << "\">" << Escape(run.text) << "</span>";
+            }
+        }
+
+        rml << "</div>";
+    }
+}
+
+/// <summary>
+/// Writes one card's stat block, including the case where the item has none.
+///
+/// An empty entry is not the same as a missing one: the worker returns an entry for every
+/// item on the page, so an entry that is present and empty means the item genuinely has no
+/// stored stat text. Saying so is the difference between a card that explains itself and a
+/// card that looks like it failed to load -- and on this collection it is not a rare case:
+/// items the client has never been able to generate stat text for sort first under an empty
+/// search, so it is the first thing the overlay shows.
+/// </summary>
+void AppendCardStats(std::ostringstream& rml, const std::vector<iagd::ReplicaRow>& rows) {
+    if (rows.empty()) {
+        rml << "<div class=\"nostats\">No stat details stored for this item.</div>";
+        return;
+    }
+
+    AppendReplicaRows(rml, rows, true);
+}
+
+/// <summary>
+/// Draws the visible slice of the current result.
+///
+/// Only a slice: with the stats on the cards, a card is twenty or thirty elements rather
+/// than four, and a database page is several hundred stacks. Drawing them all was
+/// affordable when a card was a name and a level, and is not now. The client solves the
+/// same problem the same way, serving its grid in batches rather than the whole match set.
+/// </summary>
+void RenderView(bool preserveScroll = false) {
     ShellState& s = state();
     if (s.document == nullptr) {
         return;
@@ -323,24 +496,38 @@ void RenderResults(const OverlaySearchResult& result) {
         return;
     }
 
-    std::ostringstream rml;
+    // Replacing the contents scrolls the container back to the top. On a refresh that is
+    // the player being yanked to the top of the list mid-read -- and, while the client was
+    // writing in a loop, it was why the wheel appeared not to work at all: it scrolled, and
+    // was put back a fraction of a second later.
+    const float scrollTop = preserveScroll ? container->GetScrollTop() : 0.0f;
 
-    for (size_t i = 0; i < result.stacks.size(); i++) {
-        const iagd::ItemSearchRow& row = result.stacks[i].front();
+    const size_t first = (size_t)s.viewOffset;
+    const size_t last = (std::min)(s.stacks.size(), first + (size_t)kCardsPerView);
+
+    std::ostringstream rml;
+    std::vector<int64_t> visibleIds;
+
+    for (size_t i = first; i < last; i++) {
+        const iagd::ItemSearchRow& row = s.stacks[i].front();
+        visibleIds.push_back(row.id);
 
         long long count = 0;
-        for (const auto& member : result.stacks[i]) {
+        for (const auto& member : s.stacks[i]) {
             count += member.stackCount > 0 ? member.stackCount : 1;
         }
 
         std::string icon;
-        auto found = result.icons.find(row.baseRecord);
-        if (found != result.icons.end()) {
+        auto found = s.icons.find(row.baseRecord);
+        if (found != s.icons.end()) {
             icon = "/storage/" + iagd::ItemIcons::ToImageFileName(found->second);
         }
 
+        // data-index is the absolute index into the result, not the index within the
+        // slice, so a click still resolves to the right item after paging.
         rml << "<div class=\"card " << RarityClass(row.rarity) << "\" data-index=\"" << i << "\">";
 
+        rml << "<div class=\"cardhead\">";
         if (icon.empty()) {
             // No bitmap stat on the record at all, which is different from a bitmap whose
             // file is missing -- that one is the render interface's placeholder.
@@ -355,24 +542,193 @@ void RenderResults(const OverlaySearchResult& result) {
             << "<div class=\"meta\">level " << (int)row.levelRequirement;
 
         if (count > 1) {
-            rml << " &middot; x" << count;
+            rml << " " << kMiddleDot << " x" << count;
         }
 
         rml << "</div></div></div>";
+
+        // Filled in when the worker returns the page's rows. Present but empty until then,
+        // so the grid appears at once and gains its stats a moment later rather than the
+        // player waiting on a second query before seeing anything.
+        rml << "<div class=\"stats\" id=\"stats-" << i << "\">";
+        auto cached = s.pageDetails.find(row.id);
+        if (cached != s.pageDetails.end()) {
+            AppendCardStats(rml, cached->second);
+        }
+        rml << "</div>";
+
+        rml << "</div>";
     }
 
     container->SetInnerRML(rml.str());
 
-    std::ostringstream status;
-    status << result.stacks.size() << (result.stacks.size() == 1 ? " stack" : " stacks");
-    if (result.wasTruncated) {
-        status << " (more available, use Next)";
-    }
-    if (s.skip > 0) {
-        status << " -- from " << s.skip;
+    if (preserveScroll && scrollTop > 0.0f) {
+        s.document->UpdateDocument();
+        container->SetScrollTop(scrollTop);
+
+        s.restoreScrollTop = scrollTop;
+        s.restoreScrollFrames = kScrollRestoreFrames;
     }
 
+    // Re-apply the selection: the cards were just rebuilt, so the class went with them.
+    if (s.selectedIndex >= (int)first && s.selectedIndex < (int)last) {
+        if (Rml::Element* card = container->GetChild((int)((size_t)s.selectedIndex - first))) {
+            card->SetClass("selected", true);
+        }
+    }
+
+    std::ostringstream status;
+    if (s.stacks.empty()) {
+        status << "No matching items";
+    }
+    else {
+        status << "showing " << (first + 1) << "-" << last << " of " << s.stacks.size();
+        if (s.lastWasTruncated) {
+            status << "+";
+        }
+        status << (s.stacks.size() == 1 ? " stack" : " stacks");
+    }
     SetStatus(status.str());
+
+    if (!visibleIds.empty()) {
+        OverlaySearch::SubmitPageDetails(visibleIds, OverlaySearch::CurrentGeneration());
+    }
+}
+
+/// <summary>
+/// Fills in the stat blocks of the cards already on screen.
+///
+/// Writes into each card's existing stats element rather than rebuilding the grid: the
+/// player may already be reading it, and replacing the whole list under them would lose
+/// their scroll position and blink every card.
+/// </summary>
+void ApplyPageDetails() {
+    ShellState& s = state();
+    if (s.document == nullptr) {
+        return;
+    }
+
+    const size_t first = (size_t)s.viewOffset;
+    const size_t last = (std::min)(s.stacks.size(), first + (size_t)kCardsPerView);
+
+    for (size_t i = first; i < last; i++) {
+        const int64_t itemId = s.stacks[i].front().id;
+
+        auto rows = s.pageDetails.find(itemId);
+        if (rows == s.pageDetails.end()) {
+            continue;
+        }
+
+        Rml::Element* target = s.document->GetElementById("stats-" + std::to_string(i));
+        if (target == nullptr) {
+            continue;
+        }
+
+        std::ostringstream rml;
+        AppendCardStats(rml, rows->second);
+        target->SetInnerRML(rml.str());
+    }
+}
+
+/// <summary>
+/// Sizes and positions the results scroll thumb from the pane it describes.
+///
+/// Done per frame rather than on scroll: the thumb depends on the content height as well as
+/// the offset, and the content height changes on its own when a page's stat rows arrive.
+/// Nothing is written unless a value actually changed, so a still list costs two float
+/// comparisons.
+/// </summary>
+void UpdateScrollThumb() {
+    ShellState& s = state();
+    if (s.document == nullptr) {
+        return;
+    }
+
+    Rml::Element* results = s.document->GetElementById("results");
+    Rml::Element* thumb = s.document->GetElementById("scrollthumb");
+    if (results == nullptr || thumb == nullptr) {
+        return;
+    }
+
+    const float content = results->GetScrollHeight();
+    const float visible = results->GetClientHeight();
+    const float range = content - visible;
+
+    float height = 0.0f;
+    float offset = 0.0f;
+
+    // Nothing to scroll leaves the thumb at zero height, which reads as "this is all of it"
+    // rather than as a scrollbar stuck at full length.
+    if (range > 1.0f && content > 0.0f) {
+        const float track = thumb->GetParentNode()->GetClientHeight();
+        const float minimum = 24.0f;
+
+        height = track * (visible / content);
+        height = height < minimum ? minimum : height;
+        offset = (track - height) * (results->GetScrollTop() / range);
+    }
+
+    if (height != s.thumbHeight || offset != s.thumbOffset) {
+        s.thumbHeight = height;
+        s.thumbOffset = offset;
+
+        thumb->SetProperty("height", std::to_string((int)height) + "px");
+        thumb->SetProperty("margin-top", std::to_string((int)offset) + "px");
+    }
+}
+
+void RenderResults(const OverlaySearchResult& result) {
+    ShellState& s = state();
+
+    const bool preserveView = s.preserveViewOnNextResult;
+    s.preserveViewOnNextResult = false;
+
+    const int previousOffset = s.viewOffset;
+    const int previousSelection = s.selectedIndex;
+    const int64_t previousSelectedId =
+        (previousSelection >= 0 && previousSelection < (int)s.stacks.size())
+            ? s.stacks[previousSelection].front().id
+            : 0;
+
+    s.stacks = result.stacks;
+    s.icons = result.icons;
+    s.lastWasTruncated = result.wasTruncated;
+
+    if (!preserveView) {
+        s.selectedIndex = -1;
+        s.viewOffset = 0;
+
+        // A new question: the stats on hand answer the old one, and the player is about to
+        // be looking at different items.
+        s.pageDetails.clear();
+        RenderView();
+        return;
+    }
+
+    // A refresh. The rows may have shifted -- an item can have been transferred away, or
+    // the client may have just given one the stats it was missing -- so the selection is
+    // followed by identity rather than by index, and the page is clamped rather than reset.
+    s.viewOffset = 0;
+    if (!s.stacks.empty() && previousOffset > 0) {
+        const int lastStart = ((int)(s.stacks.size() - 1) / kCardsPerView) * kCardsPerView;
+        s.viewOffset = previousOffset < lastStart ? previousOffset : lastStart;
+    }
+
+    s.selectedIndex = -1;
+    if (previousSelectedId != 0) {
+        for (size_t i = 0; i < s.stacks.size(); i++) {
+            if (s.stacks[i].front().id == previousSelectedId) {
+                s.selectedIndex = (int)i;
+                break;
+            }
+        }
+    }
+
+    if (s.pageDetails.size() > kMaxCachedDetails) {
+        s.pageDetails.clear();
+    }
+
+    RenderView(true);
 }
 
 /// <summary>
@@ -394,32 +750,7 @@ void RenderDetail(const OverlayItemDetail& detail) {
     }
 
     std::ostringstream rml;
-
-    for (size_t i = 0; i < detail.rows.size(); i++) {
-        const iagd::ReplicaRow& row = detail.rows[i];
-
-        if (iagd::ReplicaSections::IsBlank(row)) {
-            rml << "<div class=\"replica-blank\"/>";
-            continue;
-        }
-
-        rml << "<div class=\"replica-row replica-type-" << row.type << "\">";
-
-        for (const iagd::TextRun& run : iagd::ReplicaText::Parse(row.text)) {
-            if (run.text.empty()) {
-                continue;
-            }
-
-            if (run.code == 0) {
-                rml << Escape(run.text);
-            }
-            else {
-                rml << "<span class=\"replica-letter-" << run.code << "\">" << Escape(run.text) << "</span>";
-            }
-        }
-
-        rml << "</div>";
-    }
+    AppendReplicaRows(rml, detail.rows, false);
 
     if (detail.rows.empty()) {
         rml << "<div class=\"replica-row\">This item has no stored stat text.</div>";
@@ -554,8 +885,15 @@ private:
     void OnClick(Rml::Element* target) {
         ShellState& s = state();
 
+        // Paging walks the slice first and only asks the database when the slice runs out
+        // of the page it already has. A player stepping through results should not pay for
+        // a query per step when the rows are already in hand.
         if (target->GetId() == "prev") {
-            if (s.skip > 0) {
+            if (s.viewOffset > 0) {
+                s.viewOffset = s.viewOffset > kCardsPerView ? s.viewOffset - kCardsPerView : 0;
+                RenderView();
+            }
+            else if (s.skip > 0) {
                 s.skip = s.skip > kPageSize ? s.skip - kPageSize : 0;
                 RunSearch();
             }
@@ -563,8 +901,21 @@ private:
         }
 
         if (target->GetId() == "next") {
-            s.skip += kPageSize;
-            RunSearch();
+            if (s.viewOffset + kCardsPerView < (int)s.stacks.size()) {
+                s.viewOffset += kCardsPerView;
+                RenderView();
+            }
+            else if (s.lastWasTruncated) {
+                // The slice is at the end of this database page and there are more rows
+                // behind it.
+                s.skip += kPageSize;
+                RunSearch();
+            }
+            return;
+        }
+
+        if (target->GetId() == "close") {
+            OverlayInput::RequestClose();
             return;
         }
 
@@ -648,25 +999,63 @@ const char* const kDocument = R"RML(<rml>
             padding-top: 4dp;
         }
 
+        /* Floated so it keeps the top-right corner as the bar's contents change, which is
+           where a window's close control is expected to be. Escape does the same thing;
+           the button is there so that is discoverable without being told. */
+        #close {
+            display: inline-block;
+            float: right;
+            padding: 4dp 14dp;
+            border: 1dp;
+        }
+
         #body {
             display: flex;
             flex-direction: row;
-            flex: 1 1 auto;
+            flex: 1 1 0dp;
             min-height: 0dp;
         }
 
+        /* overflow-y is "hidden" rather than "auto" on all three scrolling panes, and the
+           wheel is driven from OverlayUi instead. Giving RmlUi a scrollbar to lay out here
+           collapses the pane's children to their minimum content width -- every stat line
+           wrapping to one word -- which was reproduced in-game with "auto" and again with
+           "scroll", and disappears with "hidden". Clipping is all these panes need from the
+           layout; the scrolling they need is an offset, which OverlayUi sets directly. */
         #sidebar {
             display: block;
             flex: 0 0 190dp;
-            overflow-y: auto;
+            overflow-y: hidden;
             padding: 8dp;
         }
 
+        /* flex-basis is 0 rather than auto so this row cannot claim its content's height.
+           With "auto" the column of cards -- twenty thousand dp of it -- became the height
+           the row asked for, #root handed it over, and nothing ever overflowed, so there
+           was nothing to scroll. */
         #results {
             display: block;
             flex: 1 1 auto;
-            overflow-y: auto;
+            overflow-y: hidden;
             padding: 4dp;
+        }
+
+        /* The scroll indicator RmlUi's own overflow would have drawn.
+           #results clips rather than scrolls (see the overflow comment above), so there is
+           no scrollbar and a player has nothing telling them the list continues. This is a
+           sibling of the results rather than a child, so it does not scroll along with the
+           content it is describing; the thumb is sized and positioned from C++ in Update. */
+        #scrolltrack {
+            display: block;
+            flex: 0 0 6dp;
+            margin: 4dp 2dp;
+        }
+
+        #scrollthumb {
+            display: block;
+            width: 6dp;
+            height: 0dp;
+            border-radius: 3dp;
         }
 
         /* The stat pane is a column of its own so the transfer bar stays put while the
@@ -699,8 +1088,8 @@ const char* const kDocument = R"RML(<rml>
 
         #detail {
             display: block;
-            flex: 1 1 auto;
-            overflow-y: auto;
+            flex: 1 1 0dp;
+            overflow-y: hidden;
             padding: 10dp;
         }
 
@@ -728,13 +1117,18 @@ const char* const kDocument = R"RML(<rml>
             border: 1dp;
         }
 
+        /* A card is a header and a stat block rather than a fixed-height row: the whole
+           point of the stats being here is that several items can be read at once, which
+           needs each card to be as tall as the item it describes. The client's own grid
+           does the same. */
         .card {
             display: block;
-            height: 44dp;
-            margin-bottom: 2dp;
-            padding: 4dp;
+            margin-bottom: 4dp;
+            padding: 6dp;
             border-left: 3dp;
         }
+
+        .cardhead { display: block; }
 
         .card .icon {
             display: inline-block;
@@ -747,7 +1141,21 @@ const char* const kDocument = R"RML(<rml>
         .name { display: block; }
         .meta { display: block; font-size: 11dp; }
 
+        /* Indented under the header so the eye can run down one item's stats without
+           picking up the next item's. */
+        .stats {
+            display: block;
+            margin-left: 44dp;
+            margin-top: 3dp;
+        }
+
         .replica-row { display: block; margin-bottom: 1dp; }
+
+        /* An explanation, not a stat, so it does not read as one. Distinguished by size and
+           colour rather than by italics: only one font face is registered (see LoadFontFace,
+           FontStyle::Normal), and RmlUi resolves font-style against the faces it has -- asking
+           for italic finds none and silently draws nothing at all. */
+        .nostats { display: block; font-size: 12dp; }
         .replica-blank { display: block; height: 8dp; }
 
         /* Ported from WebUI/src/containers/ReplicaStat.css: the item's own name and the
@@ -795,9 +1203,10 @@ const char* const kDocument = R"RML(<rml>
             <select id="quality"/>
             <select id="slot"/>
             <div id="status">Searching...</div>
+            <div id="close" title="Close (Esc)">Close</div>
         </div>
         <div id="body">
-            <div id="sidebar"/><div id="results"/>
+            <div id="sidebar"/><div id="results"/><div id="scrolltrack"><div id="scrollthumb"/></div>
             <div id="detailcol">
                 <div id="transfer-bar">
                     <div id="transfer">Transfer to stash</div>
@@ -844,8 +1253,10 @@ body { color: #cfc8bb; }
 .name { color: #dbb284; }
 .meta { color: gray; }
 .icon.noicon { background-color: #2b241a; }
-#prev, #next { background-color: #2a2118; border-color: #6b5a3a; }
-#prev:hover, #next:hover { background-color: #4a3a22; }
+#prev, #next, #close { background-color: #2a2118; border-color: #6b5a3a; }
+#scrolltrack { background-color: #1b1710; }
+#scrollthumb { background-color: #6b5a3a; }
+#prev:hover, #next:hover, #close:hover { background-color: #4a3a22; }
 
 .rarity-White { border-left-color: #b0b0b0; }
 .rarity-Yellow { border-left-color: #ffff00; }
@@ -855,6 +1266,7 @@ body { color: #cfc8bb; }
 .rarity-Legendary { border-left-color: #9932cc; }
 
 .replica-row { color: gray; }
+.nostats { color: #6f675b; }
 .replica-type-16, .replica-type-17, .replica-type-30, .replica-type-32 { color: #b3af8c; }
 .replica-type-66 { color: #dbb284; }
 .replica-type-20 { color: gray; }
@@ -903,8 +1315,10 @@ body { color: #4a4034; }
 .name { color: #4a4034; }
 .meta { color: #726a5b; }
 .icon.noicon { background-color: #d6c9ad; }
-#prev, #next { background-color: #e2d8c4; border-color: #a08a5a; }
-#prev:hover, #next:hover { background-color: #d6c9ad; }
+#prev, #next, #close { background-color: #e2d8c4; border-color: #a08a5a; }
+#scrolltrack { background-color: #e8dfcd; }
+#scrollthumb { background-color: #a08a5a; }
+#prev:hover, #next:hover, #close:hover { background-color: #d6c9ad; }
 
 .rarity-White { border-left-color: #808080; }
 .rarity-Yellow { border-left-color: #b8a000; }
@@ -914,6 +1328,7 @@ body { color: #4a4034; }
 .rarity-Legendary { border-left-color: #9932cc; }
 
 .replica-row { color: #655e52; }
+.nostats { color: #8a8172; }
 .replica-type-16, .replica-type-17, .replica-type-30, .replica-type-32 { color: #4a4034; }
 .replica-type-66 { color: #4a4034; }
 .replica-type-20 { color: #655e52; }
@@ -1064,30 +1479,58 @@ void OverlayShell::Update() {
         return;
     }
 
-    if (s.hasScheduledSearch) {
-        const unsigned long tick = ::GetTickCount();
-        if ((long)(tick - s.scheduledAtTick) >= 0) {
-            RunSearch();
-        }
-    }
+    const unsigned long tick = ::GetTickCount();
 
     // The client has written to the database. Whatever is on screen may name an item that
-    // has just been transferred away, so ask again rather than leave it there.
+    // has just been transferred away, so ask again rather than leave it there -- but not
+    // yet, and not once per commit. See kRefreshQuietMilliseconds.
     const unsigned long long changes = OverlaySearch::DataVersionChanges();
     if (changes != s.lastDataVersionChanges) {
         s.lastDataVersionChanges = changes;
-        ScheduleSearch();
+
+        if (!s.hasDeferredRefresh) {
+            s.hasDeferredRefresh = true;
+            s.refreshDeferredSinceTick = tick;
+        }
+
+        s.refreshQuietUntilTick = tick + kRefreshQuietMilliseconds;
+    }
+
+    if (s.hasDeferredRefresh) {
+        const bool hasGoneQuiet = (long)(tick - s.refreshQuietUntilTick) >= 0;
+        const bool hasWaitedLongEnough =
+            (long)(tick - (s.refreshDeferredSinceTick + kRefreshMaximumDeferMilliseconds)) >= 0;
+
+        if (hasGoneQuiet || hasWaitedLongEnough) {
+            s.hasDeferredRefresh = false;
+            ScheduleRefresh();
+        }
+    }
+
+    if (s.hasScheduledSearch) {
+        if ((long)(tick - s.scheduledAtTick) >= 0) {
+            RunSearch(s.scheduledPreservesView);
+        }
     }
 
     if (OverlaySearchResultPtr result = OverlaySearch::TakeResult()) {
         if (result->ok) {
-            s.stacks = result->stacks;
-            s.selectedIndex = -1;
             RenderResults(*result);
         }
         else {
             s.stacks.clear();
             SetStatus("The search failed: " + result->error);
+        }
+    }
+
+    // The stat rows for the cards on screen. Applied to the existing cards rather than by
+    // redrawing them, so the grid does not flicker when the stats arrive.
+    if (OverlayPageDetailsPtr page = OverlaySearch::TakePageDetails()) {
+        if (page->ok && page->generation == OverlaySearch::CurrentGeneration()) {
+            for (auto& entry : page->byItem) {
+                s.pageDetails[entry.first] = entry.second;
+            }
+            ApplyPageDetails();
         }
     }
 
@@ -1106,5 +1549,19 @@ void OverlayShell::Update() {
     const std::string transferStatus = OverlayTransfer::TakeStatus();
     if (!transferStatus.empty()) {
         SetTransferStatus(transferStatus);
+    }
+
+    UpdateScrollThumb();
+
+    // Last, after the stat rows have been written into the cards and changed their heights:
+    // put the scroll back where the refresh found it. See restoreScrollFrames.
+    if (s.restoreScrollFrames > 0) {
+        s.restoreScrollFrames--;
+
+        if (Rml::Element* results = s.document->GetElementById("results")) {
+            if (results->GetScrollTop() != s.restoreScrollTop) {
+                results->SetScrollTop(s.restoreScrollTop);
+            }
+        }
     }
 }

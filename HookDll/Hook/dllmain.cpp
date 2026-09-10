@@ -291,17 +291,37 @@ void StartWorkerThread() {
 
 void EndWorkerThread() {
 	LogToFile(LogLevel::INFO, L"Ending worker thread..");
-	if (g_hEvent != NULL) {
-		SetEvent(g_hEvent);
-		HANDLE h = g_hEvent;
-
-		g_hEvent = NULL;
-		Sleep(1500); // The worker thread might have just read from g_hEvent, seen that it is not NULL, then sent it in to WaitForSingleObject right after we close it.		
-		CloseHandle(h);
-
-		//WaitForSingleObject(g_thread, INFINITE);
-		CloseHandle(g_thread);
+	if (g_hEvent == NULL) {
+		return;
 	}
+
+	HANDLE h = g_hEvent;
+
+	// Cleared before the wake, because that is what the worker's loop re-reads to decide to stop.
+	g_hEvent = NULL;
+	SetEvent(h);
+
+	if (g_thread != NULL) {
+		// Wait for the worker to actually leave this module's code, rather than sleeping and
+		// hoping. The old code slept 1500ms with the wait commented out, and noted the race it
+		// left open: the worker can read g_hEvent, see it non-null, and enter WaitForSingleObject
+		// just as the handle is closed underneath it. That is survivable while the process is
+		// exiting -- nothing unmapped is ever called again -- and is not survivable on a real
+		// unload. Driving one showed exactly that: the worker was still inside this module when
+		// FreeLibrary unmapped it, and the game died with it. Waiting first also closes the race,
+		// since the handle is only closed once nothing can be waiting on it.
+		//
+		// Bounded rather than INFINITE: a wedged worker should be a logged warning, not a caller
+		// that never returns.
+		if (WaitForSingleObject(g_thread, 5000) != WAIT_OBJECT_0) {
+			LogToFile(LogLevel::WARNING, L"The worker thread did not exit in time; unloading this module now would be unsafe.");
+		}
+
+		CloseHandle(g_thread);
+		g_thread = NULL;
+	}
+
+	CloseHandle(h);
 }
 
 #pragma endregion
@@ -691,12 +711,25 @@ int ProcessAttach(HINSTANCE _hModule) {
 
 
 #pragma region Attach_Detatch
-int ProcessDetach(HINSTANCE _hModule) {
-	// Signal that we are shutting down
-	// This message is not at all guaranteed to get sent.
+// True once the hooks have been taken out, so an unload that follows an explicit IAGD_Unhook
+// does not try to do it a second time.
+static bool g_hooksReleased = false;
 
-	LOG(L"Detatching DLL..");
-	OutputDebugString(L"ProcessDetach");
+// <summary>
+// Takes every hook out, in the order the teardown has to happen in. Safe to call twice.
+//
+// This does not belong inside DllMain and cannot be made to work there: it joins the search
+// worker, and a thread cannot finish exiting while the loader lock is held -- which DllMain
+// holds for its whole duration. Driving an unload for the first time proved it: the teardown
+// reached the input hook, restored the window procedure, and then hung on the join with the
+// renderer detour still installed. Anything that means to unload this module calls
+// IAGD_Unhook from an ordinary thread first, and only then FreeLibrary.
+// </summary>
+static void ReleaseHooks() {
+	if (g_hooksReleased) {
+		return;
+	}
+	g_hooksReleased = true;
 
 	// Before anything else is torn down: the handler lives in this module, so it has to stop being reachable
 	// while this module is still mapped.
@@ -729,6 +762,34 @@ int ProcessDetach(HINSTANCE _hModule) {
 	g_InventorySack_AddItemInstance = nullptr;
 
 	EndWorkerThread();
+}
+
+// <summary>
+// Puts the game back the way it was found, so the module can then be unloaded.
+//
+// Exported because it has to be callable on an ordinary thread: see ReleaseHooks for why the
+// same work cannot be done from DllMain. Nothing in normal operation calls this -- the game
+// exits with the DLL still mapped -- it exists so that an unload is possible at all, and so
+// that the detach ordering can be exercised rather than only reasoned about.
+// </summary>
+extern "C" __declspec(dllexport) void IAGD_Unhook() {
+	LOG(L"Unhook requested, releasing hooks off the loader lock..");
+	ReleaseHooks();
+	LOG(L"Hooks released, the module can now be unloaded.");
+}
+
+int ProcessDetach(HINSTANCE _hModule, bool isProcessExit) {
+	LOG(L"Detatching DLL..");
+	OutputDebugString(L"ProcessDetach");
+
+	if (!isProcessExit && !g_hooksReleased) {
+		// A FreeLibrary that skipped IAGD_Unhook. The teardown below will hang on the search
+		// worker's join, so say why here rather than leaving a silent stop in the log.
+		LOG(L"Unloading without IAGD_Unhook first. The teardown joins a worker thread and cannot "
+			L"finish inside DllMain, so this is expected to hang. Call IAGD_Unhook, then FreeLibrary.");
+	}
+
+	ReleaseHooks();
 
 	// Best-effort cleanup of PID file in Wine mode
 	if (g_isRunningInWine && !g_linuxHackFolder.empty()) {
@@ -754,7 +815,8 @@ BOOL APIENTRY DllMain(HINSTANCE hModule, DWORD  ul_reason_for_call, LPVOID lpRes
 		return ProcessAttach(hModule);
 
 	case DLL_PROCESS_DETACH:
-		return ProcessDetach(hModule);
+		// lpReserved is null for FreeLibrary and non-null when the process is going away.
+		return ProcessDetach(hModule, lpReserved != nullptr);
 	}
 	return TRUE;
 }

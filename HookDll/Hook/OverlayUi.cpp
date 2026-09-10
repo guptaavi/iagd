@@ -447,6 +447,40 @@ Rml::ElementDocument* LoadOverlayDocument(unsigned long long& outFileTime) {
 /// pixels. They are usually the same, but the game is free to render at a resolution that
 /// is not the window's size, and then every click would land somewhere else.
 /// </summary>
+/// How far one notch of the wheel moves a pane. Three lines is the Windows default and
+/// reads as a crawl against cards this tall, so this is nearer a third of a card.
+const float kWheelStepPixels = 120.0f;
+
+/// <summary>
+/// Scrolls the innermost clipping pane under the pointer.
+///
+/// Walks up from the hovered element rather than addressing #results by name: the pointer
+/// may be over the sidebar or the stat pane, and each of those is as much a scrolling pane
+/// as the results are. Only elements that actually clip are considered, so the walk cannot
+/// end up scrolling the document itself.
+/// </summary>
+void ScrollUnderPointer(float deltaPixels) {
+    for (Rml::Element* element = g_context->GetHoverElement();
+         element != nullptr;
+         element = element->GetParentNode()) {
+
+        if (element->GetComputedValues().overflow_y() == Rml::Style::Overflow::Visible) {
+            continue;
+        }
+
+        const float range = element->GetScrollHeight() - element->GetClientHeight();
+        if (range <= 1.0f) {
+            continue;
+        }
+
+        float target = element->GetScrollTop() + deltaPixels;
+        target = target < 0.0f ? 0.0f : (target > range ? range : target);
+
+        element->SetScrollTop(target);
+        return;
+    }
+}
+
 void DrainInput() {
     HWND window = OverlayInput::Window();
     if (window == nullptr) {
@@ -475,7 +509,16 @@ void DrainInput() {
             lParam = MAKELPARAM(x, y);
         }
 
-        RmlWin32::WindowProcedure(g_context, *g_textInput, window, message.message, message.wParam, lParam);
+        const bool wasConsumed = !RmlWin32::WindowProcedure(
+            g_context, *g_textInput, window, message.message, message.wParam, lParam);
+
+        // The panes clip rather than scroll (see the overflow comment in OverlayShell), so
+        // RmlUi has no scrollbar to work the wheel against and leaves the message
+        // unconsumed. Turning it into a scroll offset is this side's job.
+        if (message.message == WM_MOUSEWHEEL && !wasConsumed) {
+            const float notches = (float)(short)HIWORD(message.wParam) / (float)WHEEL_DELTA;
+            ScrollUnderPointer(-notches * kWheelStepPixels);
+        }
     }
 }
 
