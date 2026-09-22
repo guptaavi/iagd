@@ -629,6 +629,7 @@ namespace IAGrim.UI {
 
             _authService = new AuthService(new AuthenticationProvider(settingsService), playerItemDao);
             var onlineSettings = new OnlineSettings(playerItemDao, settingsService, _cefBrowserHandler, buddyItemDao, buddySubscriptionDao);
+            onlineSettings.OnUpdateBuddyList += (_, _) => _searchWindow?.UpdateListViewDelayed();
             UIHelper.AddAndShow(onlineSettings, onlinePanel);
             _authService.OnAuthCompletion += (sender, args_) => {
                 if (((args_ as AuthResultEvent)!).IsAuthorized) {

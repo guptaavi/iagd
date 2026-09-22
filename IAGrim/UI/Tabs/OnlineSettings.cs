@@ -17,6 +17,7 @@ namespace IAGrim.UI.Tabs {
         private readonly IBuddyItemDao _buddyItemDao;
         private readonly IBuddySubscriptionDao _buddySubscriptionDao;
         private TooltipHelper? _tooltipHelper;
+        public event EventHandler? OnUpdateBuddyList;
 
         public OnlineSettings(IPlayerItemDao playerItemDao, SettingsService settings, IHelpService helpService, IBuddyItemDao buddyItemDao, IBuddySubscriptionDao buddySubscriptionDao) {
             InitializeComponent();
@@ -228,6 +229,7 @@ namespace IAGrim.UI.Tabs {
                 lvi.Tag = subscription.Id;
                 buddyList.Items.Add(lvi);
             }
+            OnUpdateBuddyList?.Invoke(this, EventArgs.Empty);
         }
 
         private void helpWhatIsThis_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e) {
