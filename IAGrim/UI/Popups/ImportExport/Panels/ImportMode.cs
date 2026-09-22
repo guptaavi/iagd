@@ -17,13 +17,17 @@ namespace IAGrim.UI.Popups.ImportExport.Panels {
         private static readonly ILog Logger = LogManager.GetLogger(typeof(ImportMode));
         private readonly GDTransferFile[] _modSelection;
         private readonly IPlayerItemDao _playerItemDao;
+        private readonly Action _itemViewUpdateTrigger;
+        private readonly Action _onClose;
         private string? _filename;
         private volatile bool isLocked = false;
 
-        public ImportMode(GDTransferFile[] modSelection, IPlayerItemDao playerItemDao) {
+        public ImportMode(GDTransferFile[] modSelection, IPlayerItemDao playerItemDao, Action itemViewUpdateTrigger, Action onClose) {
             InitializeComponent();
             this._modSelection = modSelection;
             this._playerItemDao = playerItemDao;
+            this._itemViewUpdateTrigger = itemViewUpdateTrigger;
+            this._onClose = onClose;
         }
 
         private void ImportMode_Load(object sender, EventArgs e) {
@@ -155,6 +159,8 @@ namespace IAGrim.UI.Popups.ImportExport.Panels {
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information
                     );
+                    _itemViewUpdateTrigger?.Invoke();
+                    _onClose();
                 });
 
                 t.Start();

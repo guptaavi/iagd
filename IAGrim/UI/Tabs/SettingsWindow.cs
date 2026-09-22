@@ -123,7 +123,7 @@ namespace IAGrim.UI.Tabs {
 
 
         private void buttonImportExport_Click(object sender, EventArgs e) {
-            new Popups.ImportExport.ImportExportContainer(_modFilter, _playerItemDao)
+            new Popups.ImportExport.ImportExportContainer(_modFilter, _playerItemDao, _itemViewUpdateTrigger)
                 .ShowDialog();
         }
 
