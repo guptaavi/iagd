@@ -170,6 +170,46 @@ namespace IAGrim.Services {
             return !string.IsNullOrWhiteSpace(replicaInfo) && replicaInfo.Trim() != "[]";
         }
 
+        /// <summary>
+        /// The roll band for each rollable stat on a base record, keyed by the record's base value.
+        ///
+        /// Used when browsing the game database, where items have no seed: rather than showing one sampled
+        /// roll, the UI can show the range the stat can land in. Keyed by value rather than field because the
+        /// translated stat lines the UI renders carry their number but not the field they came from; values
+        /// that are ambiguous within one item are dropped so a line can never be given the wrong range.
+        /// </summary>
+        public IReadOnlyDictionary<double, (double Min, double Max)> ComputeRollRanges(string baseRecord) {
+            var empty = new Dictionary<double, (double, double)>();
+            if (string.IsNullOrEmpty(baseRecord)) {
+                return empty;
+            }
+
+            var statMap = _databaseItemStatDao.GetStats(new[] { baseRecord }, StatFetch.PlayerItems);
+            if (!statMap.TryGetValue(baseRecord, out var rows)) {
+                return empty;
+            }
+
+            var inputs = rows
+                .Where(r => r.Stat != null)
+                .Select(r => new GrimDawnItemStats.ItemStatEngine.InputStat(r.Stat!, r.TextValue ?? string.Empty, r.Value));
+
+            var byValue = new Dictionary<double, (double Min, double Max)>();
+            var ambiguous = new HashSet<double>();
+
+            foreach (var range in GrimDawnItemStats.ItemStatEngine.ComputeRanges(inputs)) {
+                var value = rows.First(r => r.Stat == range.Key).Value;
+                if (!byValue.TryAdd(value, range.Value)) {
+                    ambiguous.Add(value);
+                }
+            }
+
+            foreach (var value in ambiguous) {
+                byValue.Remove(value);
+            }
+
+            return byValue;
+        }
+
         public void ApplyStatsToPlayerItems(List<PlayerItem> items) {
             if (items.Count > 0) {
                 Logger.Debug($"Applying stats to {items.Count} items");

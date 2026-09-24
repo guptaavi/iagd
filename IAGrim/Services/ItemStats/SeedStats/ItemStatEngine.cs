@@ -47,6 +47,50 @@ public static class ItemStatEngine
 
     private const double BaseJitterPercent = 20.0;
 
+    /// <summary>
+    /// The band a stat can roll within, for showing "+21/+31 Physique" instead of one sampled value.
+    ///
+    /// No RNG is involved and no draw order matters: <see cref="Jitter.Char"/> rolls an integer uniformly in
+    /// [value - spread, value + spread] where spread = max(1, (int)(value * 20%)), so the band follows from
+    /// the base value alone. Fields the game loads without jitter (block, durations, chances, requirements)
+    /// are absent from the returned map, which is how a caller tells "no range" from "range".
+    ///
+    /// Limited on purpose to the Char, Defense and Retaliation stores: those are single jittered draws with
+    /// no scaling. Offensive damage and flat-added fields additionally take the item's attributeScalePercent
+    /// in float32, so their band is NOT simply value ± spread and they are deliberately not reported here
+    /// rather than reported wrongly.
+    /// </summary>
+    public static IReadOnlyDictionary<string, (double Min, double Max)> ComputeRanges(IEnumerable<InputStat> baseStats) {
+        var rollable = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var field in Char) {
+            rollable.Add(field);
+        }
+
+        foreach (var field in Def) {
+            rollable.Add(field);
+        }
+
+        foreach (var field in RetalFlat) {
+            rollable.Add(field);
+        }
+
+        var ranges = new Dictionary<string, (double Min, double Max)>(StringComparer.Ordinal);
+        foreach (var stat in baseStats) {
+            if (stat.Value == 0.0 || !rollable.Contains(stat.Stat)) {
+                continue;
+            }
+
+            var spread = (int)(stat.Value * BaseJitterPercent * 0.01);
+            if (spread == 0) {
+                spread = 1;
+            }
+
+            ranges[stat.Stat] = (stat.Value - spread, stat.Value + spread);
+        }
+
+        return ranges;
+    }
+
     private enum Kind { Char, Flat, SlowFlat, Dmg, Leech, OffReflex, OffSlow, OffReduc, RetalFlat, RetalDur, RetalMod, RetalReflex, Def, Conv, Skill }
 
     private readonly record struct OrderEntry(Kind Kind, string Field, bool Scales);

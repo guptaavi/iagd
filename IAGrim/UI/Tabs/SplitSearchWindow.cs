@@ -50,6 +50,19 @@ namespace IAGrim.UI.Tabs {
         public WebView2 Browser => this.webView21;
 
         /// <summary>
+        /// Native item grid, used instead of the WebView2 one when the browser cannot present (Wine).
+        /// Null when the web UI is in charge. See NativeItemGrid for the diagnosis behind this.
+        /// </summary>
+        private NativeItemGrid? _nativeGrid;
+        private bool _toolbarNormalizedAfterScale;
+
+        /// <summary>Toggles the grid between the player's stash and the whole game item database.</summary>
+        private CheckBox? _databaseMode;
+        private Database.DAO.DatabaseBrowse? _databaseBrowse;
+        private bool _searchBoxWidthPinned;
+        private int _searchBoxWidth;
+
+        /// <summary>
         /// Constructor
         /// </summary>
         /// <param name="browser"></param>
@@ -61,7 +74,8 @@ namespace IAGrim.UI.Tabs {
             Action<string> setStatus,
             IPlayerItemDao playerItemDao,
             SearchController searchController,
-            IItemTagDao itemTagDao, SettingsService settings) {
+            IItemTagDao itemTagDao, SettingsService settings,
+            CefBrowserHandler? browserHandler = null) {
             _setStatus = setStatus;
             _searchController = searchController;
             _itemTagDao = itemTagDao;
@@ -101,6 +115,246 @@ namespace IAGrim.UI.Tabs {
             }
 
             InitializeFilterPanel();
+            MaybeUseNativeItemGrid(browserHandler);
+        }
+
+        /// <summary>
+        /// Adds the "Game database" toggle to the filter toolbar.
+        ///
+        /// IAGD parses every item Grim Dawn defines in order to resolve names and stats, but the UI only ever
+        /// queries the player's own items, so those ~9,600 records are invisible. Ticking this searches them
+        /// instead - the same grid, the same search box, the same set and drop-source sections.
+        /// </summary>
+        private void AddDatabaseModeToggle() {
+            if (_nativeGrid == null || _flowPanelFilter == null) {
+                return;
+            }
+
+            _databaseBrowse = new Database.DAO.DatabaseBrowse(new Database.SessionFactory());
+
+            _databaseMode = new CheckBox {
+                Text = "Game database",
+                AutoSize = true,
+                Tag = "iatag_ui_databasemode",
+            };
+
+            _databaseMode.CheckedChanged += (_, _) => {
+                if (_databaseMode.Checked) {
+                    RefreshDatabaseListing();
+                }
+                else {
+                    _nativeGrid.LeaveDatabaseMode();
+                    UpdateListViewDelayed();
+                }
+            };
+
+            _flowPanelFilter.Controls.Add(_databaseMode);
+            NormalizeFilterToolbar();
+        }
+
+        /// <summary>
+        /// Runs the database search for whatever is in the search box. Off the UI thread: a LIKE over 9,600
+        /// names with per-row stat lookups is fast but not instant, and this runs on every keystroke.
+        /// </summary>
+        private void RefreshDatabaseListing() {
+            if (_nativeGrid == null || _databaseBrowse == null) {
+                return;
+            }
+
+            var fragment = _searchBox.Text;
+            var grid = _nativeGrid;
+            var browse = _databaseBrowse;
+
+            // The toolbar filters apply here too, otherwise ticking "Game database" silently drops them.
+            var rarity = _selectedItemQuality?.Rarity;
+            var slots = _selectedSlot?.Filter;
+            var slotInverse = _selectedSlot?.Inverse ?? false;
+            var statFilters = _filterWindow?.Filters?.Filters;
+            double.TryParse(_minLevel?.Text, out var minLevel);
+            double.TryParse(_maxLevel?.Text, out var maxLevel);
+
+            var thread = new Thread(() => {
+                var rows = browse.Search(fragment, rarity, minLevel, maxLevel, slots, slotInverse, statFilters);
+
+                // Run the database rows through the SAME stat resolution the stash search uses: a PlayerItem
+                // carrying only a base record is enough, because ApplyStatsToPlayerItems resolves everything
+                // (stats, bitmap, rarity, slot) from the records rather than from anything item-instance
+                // specific. The result is a full tooltip for an item the player has never held.
+                // Rarity and LevelRequirement are plain columns on PlayerItem, not derived from the stat
+                // rows, so they have to be carried across explicitly - otherwise both columns render blank
+                // and the tiers of a same-named item look like duplicates.
+                var items = rows.Select(r => new PlayerItem {
+                    BaseRecord = r.BaseRecord,
+                    Name = r.Name,
+                    Mod = string.Empty,
+                    Rarity = Database.DAO.DatabaseBrowse.ColourForClassification(r.Rarity),
+                    LevelRequirement = r.Level,
+                }).ToList();
+
+                try {
+                    _searchController.ItemStats.ApplyStatsToPlayerItems(items);
+                }
+                catch (Exception ex) {
+                    Logger.Warn($"Could not resolve stats for the database listing: {ex.Message}");
+                }
+
+                var json = Utilities.ItemHtmlWriter.ToJsonSerializable(
+                    items.Select(i => new List<Database.Interfaces.PlayerHeldItem> { i }).ToList());
+
+                grid.ShowDatabaseItems(json);
+                grid.BeginInvoke(new Action(() => _setStatus($"{rows.Count} items in the game database")));
+            }) {
+                IsBackground = true,
+                Name = "DatabaseBrowse",
+            };
+
+            thread.Start();
+        }
+
+        /// <summary>
+        /// Builds the "Obtained from" index off the UI thread.
+        ///
+        /// Reading database.arz costs a couple of seconds and a few hundred MB of transient allocation, so it
+        /// must not happen on the UI thread and must not delay the window. The grid checks IsLoaded, so item
+        /// details simply omit the section until it is ready rather than blocking on it.
+        /// </summary>
+        private void LoadLootGraphInBackground() {
+            var gameDir = _settings.GetLocal().CurrentGrimdawnLocation;
+            if (string.IsNullOrEmpty(gameDir) || _nativeGrid == null) {
+                return;
+            }
+
+            var grid = _nativeGrid;
+            var thread = new Thread(() => {
+                try {
+                    var graph = new Parsers.Arz.LootGraph();
+                    graph.Load(Path.Combine(gameDir, "database", "database.arz"));
+
+                    var tags = new DatabaseItemDaoImpl(new Database.SessionFactory()).GetTagDictionary();
+                    grid.BeginInvoke(new Action(() => {
+                        grid.Tags = tags;
+                        grid.LootGraph = graph;
+                    }));
+                }
+                catch (Exception ex) {
+                    Logger.Warn($"Could not build the loot graph: {ex.Message}");
+                }
+            }) {
+                IsBackground = true,
+                Name = "LootGraph",
+            };
+
+            thread.Start();
+        }
+
+        /// <summary>
+        /// Lays the search/filter toolbar out as one left-aligned row directly above the item list.
+        ///
+        /// The designer gives these controls Anchor values (_searchBox is Left|Right, _orderByLevel is Right)
+        /// which only make sense in an anchored container. Inside a FlowLayoutPanel an anchor stretches the
+        /// control's flow cell instead, so on a wide window the search box's cell eats the row, the checkbox
+        /// is flung to the far right, and the remaining filters wrap onto a second line. Their top margins are
+        /// likewise hand-tuned (20, 22, ...) to centre against the stock 8.25pt row height, and go crooked as
+        /// soon as the fonts grow.
+        ///
+        /// So: no wrapping, no anchors, and top margins recomputed to centre each control against the tallest
+        /// one (the Level group box). Called again after the fonts change, since every height moves with them.
+        /// </summary>
+        private void NormalizeFilterToolbar() {
+            var panel = _flowPanelFilter;
+            if (panel == null || panel.Controls.Count == 0) {
+                return;
+            }
+
+            panel.WrapContents = false;
+            panel.FlowDirection = FlowDirection.LeftToRight;
+            panel.AutoSize = true;
+            panel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+
+            // Clearing the anchor does not undo the width the control already took from it: the search box has
+            // been stretched to the full row, which pushes everything after it off the right-hand edge. Give it
+            // a definite width instead. MaximumSize is cleared first - the constructor pins it to (512, 0) and
+            // a max height of 0 confuses the flow layout once the font grows.
+            if (_searchBox != null) {
+                _searchBox.MaximumSize = Size.Empty;
+                _searchBox.MinimumSize = Size.Empty;
+                _searchBoxWidth = (int)(320 * Program.UiScale);
+                _searchBox.Width = _searchBoxWidth;
+
+                // Something re-stretches it on the first real resize (the window opens small and is then
+                // maximised), so hold the width rather than setting it once and hoping.
+                if (!_searchBoxWidthPinned) {
+                    _searchBoxWidthPinned = true;
+                    _searchBox.SizeChanged += (_, _) => {
+                        if (_searchBox.Width != _searchBoxWidth) {
+                            _searchBox.Width = _searchBoxWidth;
+                        }
+                    };
+                }
+            }
+
+            var tallest = 0;
+            foreach (Control control in panel.Controls) {
+                control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+                tallest = Math.Max(tallest, control.Height);
+            }
+
+            foreach (Control control in panel.Controls) {
+                var top = Math.Max(3, (tallest - control.Height) / 2);
+                control.Margin = new Padding(6, top, 6, 3);
+            }
+
+            panel.PerformLayout();
+        }
+
+        /// <summary>
+        /// Puts the native WinForms grid in front of the WebView2 control and feeds it the same item stream.
+        ///
+        /// Enabled automatically under Wine, where WebView2 loads and runs the page but never presents its
+        /// child window, leaving the item grid permanently blank (see NativeItemGrid). Set IAGD_NATIVE_GRID=0
+        /// to force the web UI back on, or =1 to use the native grid on Windows.
+        ///
+        /// The browser is left constructed and navigating even when hidden: it owns the host object, the
+        /// readiness handshake and the collection/help tabs, none of which are reimplemented here.
+        /// </summary>
+        private void MaybeUseNativeItemGrid(CefBrowserHandler? browserHandler) {
+            var useNative = Environment.GetEnvironmentVariable("IAGD_NATIVE_GRID") switch {
+                "0" => false,
+                "1" => true,
+                _ => Services.WineDetector.IsRunningInWine(),
+            };
+
+            if (!useNative || browserHandler == null) {
+                return;
+            }
+
+            _nativeGrid = new NativeItemGrid(_settings.GetPersistent().DarkMode) {
+                OnTransfer = (item, transferAll) => {
+                    if (item.URL == null) {
+                        return;
+                    }
+
+                    // Exactly what the web UI calls; the reply is only used for its toast, which we skip.
+                    _searchController.JsIntegration.TransferItem(item.URL, transferAll);
+                    UpdateListViewDelayed();
+                }
+            };
+
+            // Set membership comes straight out of the parsed game database; the factory is a shared, lazily
+            // built singleton behind this wrapper, so constructing one here costs nothing.
+            _nativeGrid.SetLookup = new Database.DAO.SetLookup(new Database.SessionFactory());
+            _nativeGrid.SortByLevelSecondary = _orderByLevel?.Checked ?? false;
+            _nativeGrid.RangeProvider = record => _searchController.ItemStats.ComputeRollRanges(record);
+
+            LoadLootGraphInBackground();
+            AddDatabaseModeToggle();
+
+            _toolStripContainer!.ContentPanel.Controls.Add(_nativeGrid);
+            _nativeGrid.BringToFront();
+            NormalizeFilterToolbar();
+            browserHandler.NativeItemSink = (items, replace, numFound) => _nativeGrid.SetItems(items, replace, numFound);
+
+            Logger.Info("Native item grid enabled (WebView2 cannot present under Wine)");
         }
 
         /// <summary>
@@ -181,6 +435,13 @@ namespace IAGrim.UI.Tabs {
         /// Update view
         /// </summary>
         public void UpdateListView(FilterEventArgs filters, PlayerItem? item = null) {
+            // UiScaler runs on the main window's Shown, after this form is built, and every control in the
+            // toolbar changes height when its font does. Re-centre them once we are past that point.
+            if (_nativeGrid != null && !_toolbarNormalizedAfterScale) {
+                _toolbarNormalizedAfterScale = true;
+                NormalizeFilterToolbar();
+            }
+
             var transferFile = ModSelectionHandler.SelectedMod;
 
             if (transferFile == null) {
@@ -274,8 +535,20 @@ namespace IAGrim.UI.Tabs {
                 TopLevel = false
             };
             _filterWindow.OnChanged += BeginSearchOnAutoSearch;
+
+            // In database mode the panel drives the database query; BeginSearchOnAutoSearch only re-runs the
+            // stash search, so the browser would ignore every checkbox without this.
+            _filterWindow.OnChanged += (_, _) => {
+                if (_databaseMode is { Checked: true }) {
+                    RefreshDatabaseListing();
+                }
+            };
             _mainSplitter.Panel1.Controls.Add(_filterWindow);
             _filterWindow.Show();
+
+            // This panel is rebuilt on every mod-selection change, i.e. after the one-shot pass at startup,
+            // so it needs scaling here or it stays at the stock font size while the rest of the UI grows.
+            Misc.UiScaler.Apply(_filterWindow, Program.UiScale);
         }
 
         /// <summary>
@@ -383,6 +656,21 @@ namespace IAGrim.UI.Tabs {
 
             _orderByLevel!.CheckStateChanged += delegate { UpdateListViewDelayed(); };
 
+            // The same checkbox also drives the native grid's secondary sort. In database mode no search is
+            // re-run on toggle, so the grid is re-sorted directly.
+            _orderByLevel.CheckStateChanged += delegate {
+                if (_nativeGrid != null) {
+                    _nativeGrid.SortByLevelSecondary = _orderByLevel.Checked;
+                    _nativeGrid.RefreshSort();
+                }
+            };
+
+            // In database mode these drive the database query instead of the stash search.
+            _itemQuality!.SelectedIndexChanged += (_, _) => { if (_databaseMode is { Checked: true }) RefreshDatabaseListing(); };
+            _slotFilter!.SelectedIndexChanged += (_, _) => { if (_databaseMode is { Checked: true }) RefreshDatabaseListing(); };
+            _minLevel!.TextChanged += (_, _) => { if (_databaseMode is { Checked: true }) RefreshDatabaseListing(); };
+            _maxLevel!.TextChanged += (_, _) => { if (_databaseMode is { Checked: true }) RefreshDatabaseListing(); };
+
             _flowPanelFilter!.SizeChanged += FlowPanelFilter_Resize;
             _mainSplitter.SizeChanged += FlowPanelFilter_Resize;
 
@@ -390,6 +678,12 @@ namespace IAGrim.UI.Tabs {
         }
 
         private void SearchBox_TextChanged(object? sender, EventArgs e) {
+            // In database mode the search box drives the game-database query instead of the stash search.
+            if (_databaseMode is { Checked: true }) {
+                RefreshDatabaseListing();
+                return;
+            }
+
             UpdateListViewDelayed(600);
         }
 

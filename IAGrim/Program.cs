@@ -66,6 +66,101 @@ namespace IAGrim
 
 
         /// <summary>
+        /// Scales every WinForms control by enlarging the application's default font, for large or
+        /// high-density displays where the stock 8.25pt UI is unreadable.
+        ///
+        /// Read from IAGD_UI_SCALE (e.g. "1.5"); unset or 1.0 leaves the UI exactly as upstream ships it.
+        /// Must run after ApplicationConfiguration.Initialize() (which sets its own default font) and before
+        /// any form is constructed, because WinForms resolves control fonts at construction time.
+        ///
+        /// Forms with AutoScaleMode.Font re-layout around the larger font, so this moves the whole UI rather
+        /// than overlapping it. NativeItemGrid scales its rows and icons off the same number.
+        /// </summary>
+        public static float UiScale { get; private set; } = 1.0f;
+
+        private static void ApplyUiScale() {
+            var raw = Environment.GetEnvironmentVariable("IAGD_UI_SCALE");
+            if (string.IsNullOrWhiteSpace(raw)) {
+                return;
+            }
+
+            if (!float.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var scale)) {
+                Logger.Warn($"Ignoring IAGD_UI_SCALE=\"{raw}\": not a number");
+                return;
+            }
+
+            // Below 1 the designer-fixed panels start clipping; above 4 nothing fits on screen at all.
+            scale = Math.Clamp(scale, 1.0f, 4.0f);
+            if (Math.Abs(scale - 1.0f) < 0.01f) {
+                return;
+            }
+
+            UiScale = scale;
+
+            // Deliberately NOT Application.SetDefaultFont: that only reaches controls with no font of their
+            // own, and mixing it with the tree walk in UiScaler applies the factor twice to everything else.
+            // UiScaler handles both cases from one rule.
+            Logger.Info($"UI scale {scale:0.##}x requested");
+        }
+
+        /// <summary>
+        /// Stops the tab control from covering the status bar after a font change.
+        ///
+        /// tabControl1 is ANCHORED (Top|Bottom|Left|Right) rather than docked, and the status strip below it
+        /// is docked Bottom. Changing the form's font makes WinForms run PerformAutoScale, which scales the
+        /// anchored control's height - on a maximised window the form cannot grow to match, so the tab control
+        /// simply overshoots and paints over the status bar. The item count and version disappear with it.
+        /// </summary>
+        private static void KeepStatusBarVisible(Form form) {
+            var status = form.Controls.Find("statusStrip", true).FirstOrDefault();
+            if (status == null) {
+                return;
+            }
+
+            status.BringToFront();
+
+            foreach (Control sibling in form.Controls) {
+                if (ReferenceEquals(sibling, status) || sibling.Bottom <= status.Top) {
+                    continue;
+                }
+
+                var height = status.Top - sibling.Top;
+                if (height > 50) {
+                    sibling.Height = height;
+                    Logger.Info($"Trimmed {sibling.Name} to {height}px so the status bar stays visible");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Keeps the window inside the screen's working area.
+        ///
+        /// The restored size comes from settings written on a previous run, and a larger UI scale grows the
+        /// minimum size on top of that, so the window can easily end up taller than the display - with the
+        /// status bar (item count, version) pushed off the bottom edge where it cannot be reached.
+        /// </summary>
+        private static void ClampToWorkingArea(Form form) {
+            if (form.WindowState != FormWindowState.Normal) {
+                return;
+            }
+
+            var area = Screen.FromControl(form).WorkingArea;
+            var width = Math.Min(form.Width, area.Width);
+            var height = Math.Min(form.Height, area.Height);
+
+            if (width != form.Width || height != form.Height) {
+                form.Size = new Size(width, height);
+                Logger.Info($"Clamped window to the working area: {width}x{height}");
+            }
+
+            var left = Math.Max(area.Left, Math.Min(form.Left, area.Right - width));
+            var top = Math.Max(area.Top, Math.Min(form.Top, area.Bottom - height));
+            if (left != form.Left || top != form.Top) {
+                form.Location = new Point(left, top);
+            }
+        }
+
+        /// <summary>
         ///  The main entry point for the application.
         /// </summary>
         [STAThread]
@@ -87,6 +182,8 @@ namespace IAGrim
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
             ApplicationConfiguration.Initialize();
+
+            ApplyUiScale();
 
 
             // Compiling the NHibernate mappings is ~0.5s of work that nothing before Run() depends on, so it runs
@@ -327,6 +424,16 @@ namespace IAGrim
             // Self-heal a WAL that bloated from a previous unclean shutdown (e.g. a crash or the
             // debugger being stopped). Runs off the UI thread so it never delays the window.
             System.Threading.Tasks.Task.Run(() => factory.Checkpoint());
+
+            // After Shown, so every tab and its designer-assigned fonts exist to be walked.
+            _mw.Shown += (_, _) => {
+                if (UiScale > 1.0f) {
+                    UI.Misc.UiScaler.Apply(_mw, UiScale);
+                }
+
+                ClampToWorkingArea(_mw);
+                KeepStatusBarVisible(_mw);
+            };
 
             Application.Run(_mw);
 

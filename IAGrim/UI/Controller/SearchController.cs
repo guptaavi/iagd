@@ -165,6 +165,12 @@ namespace IAGrim.UI.Controller {
             browser.AddItems(convertedItems, HasMore);
         }
 
+        /// <summary>
+        /// The stat service, exposed so the database-browse path can run the same stat resolution the search
+        /// pipeline uses. Both start from base records, so an unowned item gets the identical treatment.
+        /// </summary>
+        public ItemStatService ItemStats => _itemStatService;
+
         public string Search(ItemSearchRequest query, bool includeBuddyItems, bool orderByLevel) {
             var browser = Browser;
             if (browser == null || !browser.IsReady()) {

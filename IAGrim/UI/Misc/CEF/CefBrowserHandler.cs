@@ -23,6 +23,14 @@ namespace IAGrim.UI.Misc.CEF {
 
         public WebView2? BrowserControl { get; private set; }
 
+        /// <summary>
+        /// Optional mirror of the item stream for a non-browser grid: (groups, replaceExisting, numItemsFound).
+        /// Set by SplitSearchWindow when the native WinForms grid is in use (see NativeItemGrid for why).
+        /// Fed from the same SetItems/AddItems calls the web UI gets, so both views stay in sync and no
+        /// search, filter or paging logic is duplicated.
+        /// </summary>
+        public Action<List<List<JsonItem>>, bool, int>? NativeItemSink { get; set; }
+
         private volatile bool _isReady;
         private volatile bool _isReadyUi;
         public bool IsReady { 
@@ -145,6 +153,13 @@ namespace IAGrim.UI.Misc.CEF {
         /// <param name="items">The current batch</param>
         /// <param name="numItemsFound">The number of items found, total (eg 3000 found, but batch has 64)</param>
         public void SetItems(List<List<JsonItem>> items, int numItemsFound, bool hasMore, bool numItemsApproximate = false) {
+            if (NativeItemSink != null) {
+                // The native grid is in charge; serialising every result for a browser that never paints is
+                // pure waste on each search (and fills the log with "browser not yet initialized").
+                NativeItemSink.Invoke(items, true, numItemsFound);
+                return;
+            }
+
             SendMessage(new IOMessage {
                 Type = IOMessageType.SetItems,
                 Data = new IOMessageSetItems {
@@ -168,6 +183,11 @@ namespace IAGrim.UI.Misc.CEF {
         // value updates it - used when the real total was deferred on the first page and later computed once
         // the user paginated past it.
         public void AddItems(List<List<JsonItem>> items, bool hasMore, int numItemsFound = -1) {
+            if (NativeItemSink != null) {
+                NativeItemSink.Invoke(items, false, numItemsFound);
+                return;
+            }
+
             SendMessage(new IOMessage {
                 Type = IOMessageType.SetItems,
                 Data = new IOMessageSetItems {

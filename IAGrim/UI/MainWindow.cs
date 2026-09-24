@@ -665,7 +665,7 @@ namespace IAGrim.UI {
 
             searchController.OnSearch += (o, args) => backupService.OnSearch();
 
-            _searchWindow = new SplitSearchWindow(_cefBrowserHandler.BrowserControl!, SetFeedback, playerItemDao, searchController, itemTagDao, settingsService);
+            _searchWindow = new SplitSearchWindow(_cefBrowserHandler.BrowserControl!, SetFeedback, playerItemDao, searchController, itemTagDao, settingsService, _cefBrowserHandler);
             UIHelper.AddAndShow(_searchWindow, searchPanel);
 
 
