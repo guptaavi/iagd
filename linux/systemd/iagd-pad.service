@@ -1,0 +1,16 @@
+[Unit]
+Description=Toggle Item Assistant from the controller
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+# Chord must be one Grim Dawn ignores: the device is read passively, never grabbed, so the game
+# sees the same presses. Override here if L3+R3 turns out to do something in-game.
+Environment=IAGD_PAD_CHORD=BTN_THUMBL+BTN_THUMBR
+ExecStart=/usr/bin/python3 %h/.local/bin/iagd-pad.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
