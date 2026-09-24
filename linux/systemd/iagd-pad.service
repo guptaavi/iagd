@@ -1,13 +1,17 @@
 [Unit]
-Description=Toggle Item Assistant from the controller
+Description=Toggle Item Assistant from the controller, and drive it with the pad
 After=graphical-session.target
 
 [Service]
 Type=simple
 Environment=DISPLAY=:0
-# Chord must be one Grim Dawn ignores: the device is read passively, never grabbed, so the game
-# sees the same presses. Override here if L3+R3 turns out to do something in-game.
+# The chord is read while the pad is NOT grabbed, so the game sees the same presses: it must be
+# one Grim Dawn ignores. Override here if L3+R3 turns out to do something in-game.
 Environment=IAGD_PAD_CHORD=BTN_THUMBL+BTN_THUMBR
+# Pad-as-keyboard while Item Assistant has focus. Set to 0 to keep only the toggle.
+# Creating the virtual keyboard needs write access to /dev/uinput. The user's membership of the
+# `input` group grants that - no root, and nothing to set here (a user unit cannot setgroups).
+Environment=IAGD_PAD_CAPTURE=1
 ExecStart=/usr/bin/python3 %h/.local/bin/iagd-pad.py
 Restart=always
 RestartSec=3
