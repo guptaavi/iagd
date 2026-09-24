@@ -1,0 +1,6 @@
+*.arz
+*.gdc
+*.gst
+*.decoded
+__pycache__/
+.venv/
