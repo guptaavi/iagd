@@ -59,6 +59,7 @@ namespace IAGrim.UI.Tabs {
         /// <summary>Toggles the grid between the player's stash and the whole game item database.</summary>
         private CheckBox? _databaseMode;
         private Database.DAO.DatabaseBrowse? _databaseBrowse;
+        private System.Windows.Forms.Timer? _databaseDebounce;
         private bool _searchBoxWidthPinned;
         private int _searchBoxWidth;
 
@@ -157,6 +158,25 @@ namespace IAGrim.UI.Tabs {
         /// names with per-row stat lookups is fast but not instant, and this runs on every keystroke.
         /// </summary>
         private void RefreshDatabaseListing() {
+            if (_nativeGrid == null || _databaseBrowse == null) {
+                return;
+            }
+
+            // Coalesce keystrokes: the widened search touches skills and flavour text, so firing one per
+            // character would leave several hundred-millisecond queries racing each other.
+            _databaseDebounce?.Stop();
+            _databaseDebounce ??= new System.Windows.Forms.Timer { Interval = 250 };
+            _databaseDebounce.Tick -= DatabaseDebounceTick;
+            _databaseDebounce.Tick += DatabaseDebounceTick;
+            _databaseDebounce.Start();
+        }
+
+        private void DatabaseDebounceTick(object? sender, EventArgs e) {
+            _databaseDebounce?.Stop();
+            RunDatabaseListing();
+        }
+
+        private void RunDatabaseListing() {
             if (_nativeGrid == null || _databaseBrowse == null) {
                 return;
             }
