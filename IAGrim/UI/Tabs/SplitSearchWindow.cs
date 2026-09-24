@@ -110,13 +110,22 @@ namespace IAGrim.UI.Tabs {
                 ? Color.Black
                 : Color.FromArgb(65, 60, 53); // #413c35
 
-            var conf = CreateWebViewEnvironment();
-            if (conf != null) {
-                webView21!.EnsureCoreWebView2Async(conf);
+            // Starting WebView2 costs ~10 SECONDS on this stack, and it blocks the UI thread while it runs -
+            // which is what delayed the first item list, not any callback ordering. When the native grid is in
+            // charge the browser is never going to paint anyway, so it is not started at all.
+            var useNativeGrid = UseNativeItemGrid();
+            if (!useNativeGrid) {
+                var conf = CreateWebViewEnvironment();
+                if (conf != null) {
+                    webView21!.EnsureCoreWebView2Async(conf);
+                }
             }
 
             InitializeFilterPanel();
-            MaybeUseNativeItemGrid(browserHandler);
+
+            if (useNativeGrid) {
+                MaybeUseNativeItemGrid(browserHandler);
+            }
         }
 
         /// <summary>
@@ -190,11 +199,17 @@ namespace IAGrim.UI.Tabs {
             var slots = _selectedSlot?.Filter;
             var slotInverse = _selectedSlot?.Inverse ?? false;
             var statFilters = _filterWindow?.Filters?.Filters;
+
+            // Drop sources live in the loot graph, not the database, so the matching items are resolved here
+            // and handed to the query. Short fragments are skipped: two characters match most of the graph.
+            var sourceMatches = fragment.Length >= 3 && _nativeGrid.LootGraph is { IsLoaded: true } graph
+                ? graph.ItemsFromSourcesMatching(fragment, _nativeGrid.Tags)
+                : null;
             double.TryParse(_minLevel?.Text, out var minLevel);
             double.TryParse(_maxLevel?.Text, out var maxLevel);
 
             var thread = new Thread(() => {
-                var rows = browse.Search(fragment, rarity, minLevel, maxLevel, slots, slotInverse, statFilters);
+                var rows = browse.Search(fragment, rarity, minLevel, maxLevel, slots, slotInverse, statFilters, sourceMatches);
 
                 // Run the database rows through the SAME stat resolution the stash search uses: a PlayerItem
                 // carrying only a base record is enough, because ApplyStatsToPlayerItems resolves everything
@@ -337,14 +352,14 @@ namespace IAGrim.UI.Tabs {
         /// The browser is left constructed and navigating even when hidden: it owns the host object, the
         /// readiness handshake and the collection/help tabs, none of which are reimplemented here.
         /// </summary>
-        private void MaybeUseNativeItemGrid(CefBrowserHandler? browserHandler) {
-            var useNative = Environment.GetEnvironmentVariable("IAGD_NATIVE_GRID") switch {
-                "0" => false,
-                "1" => true,
-                _ => Services.WineDetector.IsRunningInWine(),
-            };
+        private static bool UseNativeItemGrid() => Environment.GetEnvironmentVariable("IAGD_NATIVE_GRID") switch {
+            "0" => false,
+            "1" => true,
+            _ => Services.WineDetector.IsRunningInWine(),
+        };
 
-            if (!useNative || browserHandler == null) {
+        private void MaybeUseNativeItemGrid(CefBrowserHandler? browserHandler) {
+            if (browserHandler == null) {
                 return;
             }
 
@@ -372,6 +387,13 @@ namespace IAGrim.UI.Tabs {
             _toolStripContainer!.ContentPanel.Controls.Add(_nativeGrid);
             _nativeGrid.BringToFront();
             NormalizeFilterToolbar();
+
+            // Upstream fires the first search from the WebView2 initialisation callback, which on this stack
+            // lands ~14s after start (WebView2 alone takes ~9.5s of it) - and the native grid does not need
+            // the browser at all. Kick the search off now instead. If the mod selection has not settled yet,
+            // UpdateListView asks ModSelectionHandler for the default, which re-triggers this through its own
+            // callback, so the list still arrives.
+            UpdateListViewDelayed(100);
             browserHandler.NativeItemSink = (items, replace, numFound) => _nativeGrid.SetItems(items, replace, numFound);
 
             Logger.Info("Native item grid enabled (WebView2 cannot present under Wine)");

@@ -144,7 +144,10 @@ namespace IAGrim.UI.Misc.CEF {
         }
 
         bool IBrowserCallbacks.IsReady() {
-            return IsReady;
+            // SearchController refuses to search until this returns true. With the native grid the browser is
+            // deliberately never started (its initialisation blocks the UI thread for ~10s and it cannot paint
+            // anyway), so readiness means "there is something able to receive items" - which the sink is.
+            return NativeItemSink != null || IsReady;
         }
 
         /// <summary>

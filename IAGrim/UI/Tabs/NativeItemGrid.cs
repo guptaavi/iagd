@@ -36,6 +36,7 @@ namespace IAGrim.UI.Tabs {
         private readonly HashSet<string> _tickedMembers = new(StringComparer.OrdinalIgnoreCase);
         private bool _applyingSplit;
         private bool _syncedDetailsFont;
+        private bool _firstFillRepeated;
         private readonly bool _darkMode;
         private Color _foreColour;
         private Color _mutedColour;
@@ -247,16 +248,19 @@ namespace IAGrim.UI.Tabs {
         /// right one for the item list, so rather than undo it, the stats pane is pinned to the same value:
         /// list and stats are the content, the filter panel and tabs stay one step smaller as chrome.
         /// </summary>
-        private void SyncDetailsFontOnce() {
+        private bool SyncDetailsFontOnce() {
             if (_syncedDetailsFont) {
-                return;
+                return false;
             }
 
             _syncedDetailsFont = true;
 
             if (_grid.DefaultCellStyle.Font is { } cellFont && Math.Abs(cellFont.Size - _details.Font.Size) > 0.1f) {
                 _details.Font = new Font(cellFont.FontFamily, cellFont.Size, cellFont.Style);
+                return true;
             }
+
+            return false;
         }
 
         /// <summary>
@@ -375,7 +379,10 @@ namespace IAGrim.UI.Tabs {
                 return;
             }
 
-            SyncDetailsFontOnce();
+            // Assigning a RichTextBox's Font resets the character formatting of everything already in it,
+            // which is why the FIRST details render came out uncoloured: the pane had been written before the
+            // font was synced to the grid's. Re-render once after it settles.
+            var fontChanged = SyncDetailsFontOnce();
 
             // A search result arriving from the stash pipeline would otherwise wipe a database listing.
             if (DatabaseMode) {
@@ -395,6 +402,10 @@ namespace IAGrim.UI.Tabs {
             }
 
             ApplySortAndBind();
+
+            if (fontChanged) {
+                ShowDetailsForSelection();
+            }
         }
 
         private void ApplySortAndBind() {
@@ -520,7 +531,12 @@ namespace IAGrim.UI.Tabs {
             _inSetBlock = false;
             _tickedMembers.Clear();
 
-            foreach (var line in row.DescribeLines(_ranges)) {
+            var diagLines = row.DescribeLines(_ranges).ToList();
+            Logger.Info($"[details] {row.Name} lines={diagLines.Count} withCodes={diagLines.Count(l => l.Contains('^'))} " +
+                        $"replica={row.Item.ReplicaStats?.Count ?? -1} header={row.Item.HeaderStats?.Count ?? -1} " +
+                        $"body={row.Item.BodyStats?.Count ?? -1} handle={_details.IsHandleCreated} visible={_details.Visible} vis2={Visible}");
+
+            foreach (var line in diagLines) {
                 if (set == null || !TryAppendSetLine(line, set)) {
                     AppendColoured(line);
                 }
@@ -535,8 +551,28 @@ namespace IAGrim.UI.Tabs {
             }
 
             _details.ResumeLayout();
+
+            // Wine's RichEdit stamps its own default character format over the first content it is given,
+            // discarding the colour runs (the stored RTF still has them - only the painted output is plain).
+            // Filling the pane this early used to be impossible: WebView2 delayed the first search by ~14s,
+            // by which point the control was long since realised. Now the list arrives in ~5s and the race
+            // shows, so the very first fill is repeated once the control has settled. RichTextBox is a native
+            // control and does not raise Paint, hence a timer rather than an event.
+            if (!_firstFillRepeated) {
+                _firstFillRepeated = true;
+                var settle = new System.Windows.Forms.Timer { Interval = 400 };
+                settle.Tick += (_, _) => {
+                    settle.Stop();
+                    settle.Dispose();
+                    ShowDetailsForSelection();
+                };
+
+                settle.Start();
+            }
             _details.SelectionStart = 0;
             _details.ScrollToCaret();
+
+
         }
 
         /// <summary>
@@ -578,13 +614,7 @@ namespace IAGrim.UI.Tabs {
         /// the file name, which is still more use than nothing.
         /// </summary>
         private string DisplayName(string record) {
-            var tag = LootGraph?.TagFor(record);
-            if (tag != null && Tags != null && Tags.TryGetValue(tag, out var name) && !string.IsNullOrWhiteSpace(name)) {
-                return name;
-            }
-
-            var file = record.Split('/').Last();
-            return file.EndsWith(".dbr") ? file[..^4] : file;
+            return LootGraph?.SourceLabel(record, Tags) ?? record;
         }
 
         /// <summary>

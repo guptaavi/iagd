@@ -76,7 +76,7 @@ namespace IAGrim.Database.DAO {
         /// </summary>
         public IList<DatabaseBrowseRow> Search(string? nameFragment, string? rarityColour = null, double minLevel = 0,
             double maxLevel = 0, string[]? slotClasses = null, bool slotInverse = false,
-            List<string[]>? statFilters = null, int limit = 500) {
+            List<string[]>? statFilters = null, IReadOnlyCollection<string>? sourceMatches = null, int limit = 500) {
             try {
                 using ISession session = _sessionCreator.OpenSession();
 
@@ -95,6 +95,12 @@ namespace IAGrim.Database.DAO {
                 // the item must carry a stat from EVERY array - ticking Aether and Fire means both, which is
                 // the same AND-per-filter the stash search applies. Names come from the panel, values are
                 // bound, so the only thing interpolated is the index.
+                // Items whose drop source or blueprint matched the search text. Resolved in memory from the
+                // loot graph (the sources are not in the database at all) and folded into the same OR as the
+                // name, so "Death's Vigil" or a monster's name finds what they yield.
+                var hasSources = sourceMatches is { Count: > 0 };
+                var sourceClause = hasSources ? " OR I.baserecord IN (:sourceRecords)" : string.Empty;
+
                 var filters = statFilters?.Where(f => f is { Length: > 0 }).ToList() ?? new List<string[]>();
                 var filterClause = string.Concat(filters.Select((_, i) => $@"
                     AND EXISTS (SELECT 1 FROM DatabaseItemStat_v2 F{i}
@@ -147,7 +153,8 @@ namespace IAGrim.Database.DAO {
                          OR EXISTS (SELECT 1 FROM DatabaseItemStat_v2 TX
                                JOIN ItemTag TT ON TT.Tag = TX.TextValue
                                WHERE TX.id_databaseitem = I.id_databaseitem
-                               AND TX.Stat = 'itemText' AND LOWER(TT.Name) LIKE :like))
+                               AND TX.Stat = 'itemText' AND LOWER(TT.Name) LIKE :like)"
+                         + sourceClause + @")
                     AND (:rarity = '' OR EXISTS (SELECT 1 FROM DatabaseItemStat_v2 R
                           WHERE R.id_databaseitem = I.id_databaseitem
                           AND R.Stat = 'itemClassification' AND R.TextValue = :rarity))
@@ -167,6 +174,10 @@ namespace IAGrim.Database.DAO {
 
                 if (hasSlots) {
                     query.SetParameterList("slots", slotClasses);
+                }
+
+                if (hasSources) {
+                    query.SetParameterList("sourceRecords", sourceMatches);
                 }
 
                 for (var i = 0; i < filters.Count; i++) {

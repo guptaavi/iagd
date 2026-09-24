@@ -50,6 +50,84 @@ namespace IAGrim.Parsers.Arz {
             return blueprints;
         }
 
+        /// <summary>
+        /// Faction vendors sell their stock through records under
+        /// records/creatures/npcs/merchants/factiontables/, named "&lt;faction&gt;_&lt;tier&gt;_01". Those records
+        /// carry no display name of their own - only marketStaticItems and a factiontier template - and the
+        /// game's faction names live in the UI text resources, which IAGD does not parse (its ItemTag table
+        /// holds item text only). So the seven base-game keys are mapped here explicitly; anything unmapped
+        /// falls back to the key itself rather than inventing a name.
+        /// </summary>
+        private static readonly Dictionary<string, string> FactionNames = new(StringComparer.OrdinalIgnoreCase) {
+            { "blacklegion", "The Black Legion" },
+            { "devilscrossing", "Devil's Crossing" },
+            { "homestead", "Homestead" },
+            { "kymonchosen", "Kymon's Chosen" },
+            { "orderdeathsvigil", "Order of Death's Vigil" },
+            { "rovers", "The Rovers" },
+            { "exile", "The Outcast" },
+        };
+
+        /// <summary>
+        /// A readable label for a source record: a faction vendor becomes "Order of Death's Vigil (Honored)",
+        /// a creature becomes its in-game name, and anything else falls back to the record's file name.
+        /// </summary>
+        public string SourceLabel(string record, IReadOnlyDictionary<string, string>? tags) {
+            if (record.Contains("/merchants/factiontables/")) {
+                var stem = Path.GetFileNameWithoutExtension(record);
+                var parts = stem.TrimStart('_').Split('_');
+                if (parts.Length >= 2) {
+                    var faction = FactionNames.TryGetValue(parts[0], out var name) ? name : parts[0];
+                    var tier = char.ToUpperInvariant(parts[1][0]) + parts[1][1..];
+                    return $"{faction} ({tier})";
+                }
+            }
+
+            var tag = TagFor(record);
+            if (tag != null && tags != null && tags.TryGetValue(tag, out var display) && !string.IsNullOrWhiteSpace(display)) {
+                return display;
+            }
+
+            return Path.GetFileNameWithoutExtension(record);
+        }
+
+        /// <summary>
+        /// Item records whose source or blueprint label contains <paramref name="fragment"/>, so a search for
+        /// "Death's Vigil" or a monster's name finds the items it can yield. Capped, because a short fragment
+        /// can match most of the database and the caller binds these as query parameters.
+        /// </summary>
+        public IReadOnlyCollection<string> ItemsFromSourcesMatching(string fragment, IReadOnlyDictionary<string, string>? tags, int limit = 2000) {
+            var matches = new HashSet<string>();
+            if (!IsLoaded || string.IsNullOrWhiteSpace(fragment)) {
+                return matches;
+            }
+
+            var labelCache = new Dictionary<string, bool>();
+
+            bool Matches(string record) {
+                if (!labelCache.TryGetValue(record, out var hit)) {
+                    labelCache[record] = hit = SourceLabel(record, tags)
+                        .Contains(fragment, StringComparison.OrdinalIgnoreCase);
+                }
+
+                return hit;
+            }
+
+            foreach (var (item, sources) in _sourcesByItem) {
+                if (sources.Any(Matches) && matches.Add(item) && matches.Count >= limit) {
+                    return matches;
+                }
+            }
+
+            foreach (var (item, blueprints) in _blueprintsByItem) {
+                if (blueprints.Any(Matches) && matches.Add(item) && matches.Count >= limit) {
+                    return matches;
+                }
+            }
+
+            return matches;
+        }
+
         public string? TagFor(string creatureRecord) {
             return _creatureTags.TryGetValue(creatureRecord, out var tag) ? tag : null;
         }
