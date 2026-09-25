@@ -71,5 +71,14 @@ fi
 GAMEDIR="/home/aguqz/Games/gog/grim-dawn/drive_c/GOG Games/Grim Dawn"
 cd "$GAMEDIR" || exit 1
 
+# Keep box64/Wine output somewhere readable. Launched from the XFCE menu or Sunshine, stderr
+# went nowhere, so a crash left nothing behind to read. Truncated per launch, never appended,
+# because /tmp is a tmpfs and Wine can produce a great deal of output.
+GAME_LOG="/tmp/grim-dawn-launch.log"
+
+# fixme is a firehose that would bury anything useful and fill the tmpfs; err and warn stay.
+export WINEDEBUG="${WINEDEBUG:-fixme-all}"
+
 # 64-bit build; run with the game root as CWD (Grim Dawn loads data relative to it).
-exec taskset -c 5,6,7,8,9,15,16,17,18,19 "$BOX64" "$WINE" "x64/Grim Dawn.exe" "$@"
+exec taskset -c 5,6,7,8,9,15,16,17,18,19 "$BOX64" "$WINE" "x64/Grim Dawn.exe" "$@" \
+    >"$GAME_LOG" 2>&1
