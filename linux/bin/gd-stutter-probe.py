@@ -34,12 +34,13 @@ box - a busy compile elsewhere cannot pollute the reading.
 """
 
 import os
+import select
 import statistics
 import subprocess
 import sys
 import time
 
-INTERVAL = 0.2
+INTERVAL = 0.1
 TICKS = os.sysconf("SC_CLK_TCK")
 DXVK_CACHE = os.path.expanduser(
     "~/Games/grim-dawn-classic-box64/dxvk-cache/Grim Dawn.dxvk-cache")
@@ -135,6 +136,47 @@ def cache_size():
         return 0
 
 
+class GpuSampler:
+    """GPU load, from ONE long-lived nvidia-smi rather than a spawn per sample.
+
+    A spawn per sample would cost more than the thing being measured. This streams at 1 Hz and
+    each probe sample reads the latest line, so GPU figures are coarser than the rest - good
+    enough to see a GPU-side stall, not good enough to time one.
+    """
+
+    def __init__(self):
+        self.util = -1
+        self.clock = -1
+        self.process = None
+        try:
+            self.process = subprocess.Popen(
+                ["nvidia-smi", "--query-gpu=utilization.gpu,clocks.sm",
+                 "--format=csv,noheader,nounits", "-l", "1"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        except (OSError, FileNotFoundError):
+            pass
+
+    def poll(self):
+        if self.process is None or self.process.stdout is None:
+            return
+
+        # Drain whatever has arrived; keep only the most recent reading.
+        while select.select([self.process.stdout], [], [], 0)[0]:
+            line = self.process.stdout.readline()
+            if not line:
+                self.process = None
+                return
+
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                self.util = int(parts[0])
+                self.clock = int(parts[1])
+
+    def close(self):
+        if self.process is not None:
+            self.process.terminate()
+
+
 def classify(samples):
     """Name the most likely cause of the flagged samples, without overstating it."""
     flagged = [s for s in samples if s["flagged"]]
@@ -183,8 +225,9 @@ def main():
         raise SystemExit(f"could not resolve the cgroup of pid {pid}")
 
     pressure = {name: f"{cgroup}/{name}.pressure" for name in ("cpu", "io", "memory")}
+    gpu = GpuSampler()
     header = (f"{'time':>6} {'used ms':>8} {'cpu ms':>7} {'io ms':>7} {'mem ms':>7} "
-              f"{'shader B':>9} {'read MB':>8} {'R':>3} {'D':>3}")
+              f"{'shader B':>9} {'read MB':>8} {'gpu%':>5} {'MHz':>5} {'R':>3} {'D':>3}")
 
     print(f"pid {pid}, sampling {duration:.0f}s - reproduce the freeze now\n")
     print(header)
@@ -219,6 +262,7 @@ def main():
         previous_cache = cache
 
         running, blocked = thread_states(pid)
+        gpu.poll()
 
         samples.append({
             "elapsed": time.monotonic() - started,
@@ -228,9 +272,13 @@ def main():
             "memory": stalls["memory"],
             "shader": shader_growth,
             "read": read_mb,
+            "gpu": gpu.util,
+            "mhz": gpu.clock,
             "running": running,
             "blocked": blocked,
         })
+
+    gpu.close()
 
     # Idleness is relative to how much CPU this machine's Grim Dawn normally uses, which is
     # why it is decided after the run rather than against a guessed constant.
@@ -244,7 +292,8 @@ def main():
 
         line = (f"{sample['elapsed']:6.1f} {sample['used']:8.1f} {sample['cpu']:7.1f} "
                 f"{sample['io']:7.1f} {sample['memory']:7.1f} {sample['shader']:9d} "
-                f"{sample['read']:8.2f} {sample['running']:3d} {sample['blocked']:3d}")
+                f"{sample['read']:8.2f} {sample['gpu']:5d} {sample['mhz']:5d} "
+                f"{sample['running']:3d} {sample['blocked']:3d}")
 
         if sample["flagged"]:
             print(line + ("  <-- idle" if sample["idle"] else "  <-- stall"))
