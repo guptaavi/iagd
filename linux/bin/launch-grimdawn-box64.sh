@@ -58,6 +58,16 @@ if [ -x /home/aguqz/.local/bin/launch-iagd-dev.sh ] && ! pgrep -f 'IAGrim\.exe' 
         >/tmp/iagd-autostart.log 2>&1 &
 fi
 
+# --- optional debug overrides ------------------------------------------------
+# Sourced last so it can override anything above. Create the file to run an experiment,
+# DELETE IT to go back to normal - there is nothing to undo in this script.
+DEBUG_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/grim-dawn-debug.env"
+if [ -r "$DEBUG_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$DEBUG_ENV"
+    echo "launch-grimdawn: debug overrides from $DEBUG_ENV" >&2
+fi
+
 GAMEDIR="/home/aguqz/Games/gog/grim-dawn/drive_c/GOG Games/Grim Dawn"
 cd "$GAMEDIR" || exit 1
 
