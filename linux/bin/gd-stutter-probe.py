@@ -95,6 +95,12 @@ def cpu_ms(pid):
     return (int(fields[11]) + int(fields[12])) * 1000.0 / TICKS
 
 
+def pid_of(pattern):
+    result = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+    pids = result.stdout.split()
+    return int(pids[0]) if pids else None
+
+
 def read_chars(pid):
     try:
         with open(f"/proc/{pid}/io") as handle:
@@ -226,8 +232,17 @@ def main():
 
     pressure = {name: f"{cgroup}/{name}.pressure" for name in ("cpu", "io", "memory")}
     gpu = GpuSampler()
-    header = (f"{'time':>6} {'used ms':>8} {'cpu ms':>7} {'io ms':>7} {'mem ms':>7} "
-              f"{'shader B':>9} {'read MB':>8} {'gpu%':>5} {'MHz':>5} {'R':>3} {'D':>3}")
+
+    # This Wine has no esync/fsync/ntsync, so every sync primitive round-trips through a
+    # single-threaded wineserver. If the game sleeps while wineserver burns CPU, that is the
+    # bottleneck; if BOTH go quiet, they are waiting on something further out (X, the driver).
+    server = pid_of("wineserver")
+    xorg = pid_of("[X]org|Xwayland")
+    print(f"wineserver pid {server}, X pid {xorg}")
+
+    header = (f"{'time':>6} {'used ms':>8} {'srv ms':>7} {'x ms':>6} {'cpu ms':>7} "
+              f"{'io ms':>7} {'mem ms':>7} {'shader B':>9} {'read MB':>8} {'gpu%':>5} "
+              f"{'MHz':>5} {'R':>3} {'D':>3}")
 
     print(f"pid {pid}, sampling {duration:.0f}s - reproduce the freeze now\n")
     print(header)
@@ -238,6 +253,8 @@ def main():
     previous_chars = read_chars(pid)
     previous_cache = cache_size()
     previous_cpu = cpu_ms(pid)
+    previous_server = cpu_ms(server) if server else 0.0
+    previous_xorg = cpu_ms(xorg) if xorg else 0.0
 
     started = time.monotonic()
     samples = []
@@ -253,6 +270,14 @@ def main():
         used_delta = used - previous_cpu
         previous_cpu = used
 
+        server_now = cpu_ms(server) if server else 0.0
+        server_delta = server_now - previous_server
+        previous_server = server_now
+
+        xorg_now = cpu_ms(xorg) if xorg else 0.0
+        xorg_delta = xorg_now - previous_xorg
+        previous_xorg = xorg_now
+
         chars = read_chars(pid)
         read_mb = (chars - previous_chars) / 1048576.0
         previous_chars = chars
@@ -267,6 +292,8 @@ def main():
         samples.append({
             "elapsed": time.monotonic() - started,
             "used": used_delta,
+            "server": server_delta,
+            "xorg": xorg_delta,
             "cpu": stalls["cpu"],
             "io": stalls["io"],
             "memory": stalls["memory"],
@@ -290,10 +317,11 @@ def main():
                              or sample["io"] > BAD_STALL_MS
                              or sample["idle"])
 
-        line = (f"{sample['elapsed']:6.1f} {sample['used']:8.1f} {sample['cpu']:7.1f} "
-                f"{sample['io']:7.1f} {sample['memory']:7.1f} {sample['shader']:9d} "
-                f"{sample['read']:8.2f} {sample['gpu']:5d} {sample['mhz']:5d} "
-                f"{sample['running']:3d} {sample['blocked']:3d}")
+        line = (f"{sample['elapsed']:6.1f} {sample['used']:8.1f} {sample['server']:7.1f} "
+                f"{sample['xorg']:6.1f} {sample['cpu']:7.1f} {sample['io']:7.1f} "
+                f"{sample['memory']:7.1f} {sample['shader']:9d} {sample['read']:8.2f} "
+                f"{sample['gpu']:5d} {sample['mhz']:5d} {sample['running']:3d} "
+                f"{sample['blocked']:3d}")
 
         if sample["flagged"]:
             print(line + ("  <-- idle" if sample["idle"] else "  <-- stall"))
