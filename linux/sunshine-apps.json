@@ -1,0 +1,47 @@
+{
+    "env": {
+        "PATH": "$(PATH):$(HOME)/.local/bin"
+    },
+    "apps": [
+        {
+            "name": "Desktop (1080p60)",
+            "image-path": "desktop.png",
+            "prep-cmd": [
+                {
+                    "do": "/usr/local/bin/sunshine-desktop-1080p-start.sh",
+                    "undo": "/usr/local/bin/sunshine-xfce-stop.sh"
+                }
+            ]
+        },
+        {
+            "name": "Desktop (5K Ultrawide 120Hz)",
+            "image-path": "desktop.png",
+            "prep-cmd": [
+                {
+                    "do": "/usr/local/bin/sunshine-desktop-5k-start.sh",
+                    "undo": "/usr/local/bin/sunshine-xfce-stop.sh"
+                }
+            ]
+        },
+        {
+            "name": "Desktop (3K Ultrawide 120Hz)",
+            "image-path": "desktop.png",
+            "prep-cmd": [
+                {
+                    "do": "/usr/local/bin/sunshine-desktop-3k120-start.sh",
+                    "undo": "/usr/local/bin/sunshine-xfce-stop.sh"
+                }
+            ]
+        },
+        {
+            "name": "Desktop (3K Ultrawide 60Hz)",
+            "image-path": "desktop.png",
+            "prep-cmd": [
+                {
+                    "do": "/usr/local/bin/sunshine-desktop-3k-start.sh",
+                    "undo": "/usr/local/bin/sunshine-xfce-stop.sh"
+                }
+            ]
+        }
+    ]
+}
