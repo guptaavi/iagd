@@ -24,8 +24,7 @@ namespace IAGrim.UI.Filters {
             existing.Add(cbExcludeMonsterInfrequents);
 
             var layout = new FlowLayoutPanel {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                AutoSize = false,
                 FlowDirection = FlowDirection.TopDown,
                 Location = new Point(3, 32),
                 Margin = new Padding(0),
@@ -41,8 +40,8 @@ namespace IAGrim.UI.Filters {
                 layout.Controls.Add(control);
             }
 
+            layout.Height = existing.Count * 30 + 8;
             miscPanel.Controls.Add(layout);
-            layout.SizeChanged += (_, _) => miscPanel.Height = layout.Bottom + 8;
             miscPanel.Height = layout.Bottom + 8;
             AutoSize = true;
             AutoSizeMode = AutoSizeMode.GrowAndShrink;
