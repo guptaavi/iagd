@@ -15,36 +15,21 @@ namespace IAGrim.UI.Filters {
         private FirefoxCheckBox? cbExcludeMonsterInfrequents;
         public Misc() {
             InitializeComponent();
-            // Use a real layout container instead of fixed coordinates. This lets the panel grow with
-            // every checkbox and lets the outer DesiredSkills form provide the scrollbar.
-            var existing = miscPanel.Controls.Cast<Control>().ToList();
-            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 0);
-            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 0);
-            existing.Add(cbMonsterInfrequents);
-            existing.Add(cbExcludeMonsterInfrequents);
+            var existing = miscPanel.Controls.Cast<Control>().OrderBy(control => control.Top).ToList();
+            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 32);
+            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 59);
+            cbMonsterInfrequents.Width = 285;
+            cbExcludeMonsterInfrequents.Width = 285;
 
-            var layout = new FlowLayoutPanel {
-                AutoSize = false,
-                FlowDirection = FlowDirection.TopDown,
-                Location = new Point(3, 32),
-                Margin = new Padding(0),
-                Padding = new Padding(0),
-                WrapContents = false,
-                Width = 285,
-            };
-
-            foreach (var control in existing) {
-                miscPanel.Controls.Remove(control);
-                control.Margin = new Padding(0, 0, 0, 3);
-                control.Width = 280;
-                layout.Controls.Add(control);
+            // Keep all original Misc controls, in their designer order, in two compact columns.
+            for (var i = 0; i < existing.Count; i++) {
+                var row = i / 2;
+                var column = i % 2;
+                existing[i].Left = column == 0 ? 3 : 148;
+                existing[i].Top = 92 + row * 30;
+                existing[i].Width = 140;
             }
-
-            layout.Height = existing.Count * 30 + 8;
-            miscPanel.Controls.Add(layout);
-            miscPanel.Height = layout.Bottom + 8;
-            AutoSize = true;
-            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            miscPanel.Height = Math.Max(miscPanel.Height, 92 + ((existing.Count + 1) / 2) * 30 + 8);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
