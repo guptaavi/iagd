@@ -15,9 +15,14 @@ namespace IAGrim.UI.Filters {
         private FirefoxCheckBox? cbExcludeMonsterInfrequents;
         public Misc() {
             InitializeComponent();
+            // Keep these controls at the top of the collapsible panel.  Placing them after the
+            // generated controls made them fall outside the visible bounds on scaled Wine layouts.
+            foreach (Control control in miscPanel.Controls) {
+                control.Top += 66;
+            }
             miscPanel.Height = Math.Max(miscPanel.Height, 970);
-            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 866);
-            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 899);
+            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 32);
+            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 65);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
