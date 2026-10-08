@@ -20,6 +20,11 @@ namespace IAGrim.UI.Filters {
             cbMonsterInfrequents.Width = 285;
             cbExcludeMonsterInfrequents.Width = 285;
 
+            // Recreate this legacy designer control at runtime; the custom Wine panel was dropping
+            // this particular child while reparenting/scaling the generated controls.
+            miscPanel.Controls.Remove(cbHasPetBonus);
+            cbHasPetBonus = CreateMiCheckBox("Has Pet Bonus", 0);
+
             // Keep every original Misc control explicitly represented. The custom panel's designer
             // collection can omit controls when it is reparented/scaled, so do not infer this list.
             var existing = new Control[] {
