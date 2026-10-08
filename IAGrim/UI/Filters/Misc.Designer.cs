@@ -536,7 +536,7 @@ namespace IAGrim.UI.Filters {
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.miscPanel);
             this.Name = "Misc";
-            this.Size = new System.Drawing.Size(299, 917);
+            this.Size = new System.Drawing.Size(299, 1000);
             this.Load += new System.EventHandler(this.Misc_Load);
             this.miscPanel.ResumeLayout(false);
             this.ResumeLayout(false);

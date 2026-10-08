@@ -32,7 +32,7 @@ namespace IAGrim.UI
             Controls.Add(miscFilterControl);
 
             var resistanceFilterControl = _resistanceFilters.Controls[0];
-            resistanceFilterControl.Location = new Point(12, 1275);
+            resistanceFilterControl.Location = new Point(12, 1358);
             Controls.Add(resistanceFilterControl);
 
             // Classes
@@ -43,7 +43,7 @@ namespace IAGrim.UI
             _classesFilters = new Filters.Classes(classTags);
 
             var classesFilterControl = _classesFilters.Controls[0];
-            classesFilterControl.Location = new Point(12, 1693);
+            classesFilterControl.Location = new Point(12, 1776);
             Controls.Add(classesFilterControl);
         }
 
