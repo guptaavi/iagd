@@ -373,6 +373,14 @@ namespace IAGrim.UI.Tabs {
                     _searchController.JsIntegration.TransferItem(item.URL, transferAll);
                     UpdateListViewDelayed();
                 },
+                OnTransferAll = items => {
+                    foreach (var item in items) {
+                        if (item.URL is { Length: > 0 }) {
+                            _searchController.JsIntegration.TransferItem(item.URL, true);
+                        }
+                    }
+                    UpdateListViewDelayed();
+                },
                 OnRequestMore = () => _searchController.JsIntegration.RequestMoreItems()
             };
 

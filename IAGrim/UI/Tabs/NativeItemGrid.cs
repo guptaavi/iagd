@@ -80,6 +80,8 @@ namespace IAGrim.UI.Tabs {
 
         /// <summary>Raised on double click: (item, transferAll). Wire to JavascriptIntegration.TransferItem.</summary>
         public Action<JsonItem, bool>? OnTransfer;
+        /// <summary>Raised by the bulk action for all currently displayed rows.</summary>
+        public Action<IReadOnlyList<JsonItem>>? OnTransferAll;
         public Action? OnRequestMore;
         private bool _hasMore;
         private bool _requestingMore;
@@ -201,8 +203,31 @@ namespace IAGrim.UI.Tabs {
             var copy = new ToolStripMenuItem("Copy item name");
             copy.Click += (_, _) => WithSelectedRow(row => Clipboard.SetText(row.Name));
 
+            var transferAll = new ToolStripMenuItem("Transfer all displayed items to game stash");
+            transferAll.Click += (_, _) => {
+                var items = _rows
+                    .Select(row => row.Item)
+                    .Where(item => item.URL is { Length: > 0 })
+                    .ToList();
+                if (items.Count == 0) {
+                    return;
+                }
+
+                var answer = MessageBox.Show(
+                    $"Transfer all {items.Count} displayed items to the in-game stash?",
+                    "Confirm bulk transfer",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (answer == DialogResult.Yes) {
+                    OnTransferAll?.Invoke(items);
+                }
+            };
+
             menu.Items.Add(lookup);
             menu.Items.Add(copy);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(transferAll);
             return menu;
         }
 
