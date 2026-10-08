@@ -20,7 +20,8 @@ namespace IAGrim.UI.Filters {
             foreach (Control control in miscPanel.Controls) {
                 control.Top += 66;
             }
-            miscPanel.Height = Math.Max(miscPanel.Height, 970);
+            miscPanel.AutoSize = true;
+            miscPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 32);
             cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 65);
             health.SupportsNumericFilter = true;
