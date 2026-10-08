@@ -42,6 +42,13 @@ namespace IAGrim.UI.Filters {
                 existing[i].Top = 92 + row * 30;
                 existing[i].Width = 140;
             }
+            // Force this control back into the custom panel's child collection after layout.
+            miscPanel.Controls.Remove(cbHasPetBonus);
+            cbHasPetBonus.Visible = true;
+            cbHasPetBonus.Left = 148;
+            cbHasPetBonus.Top = 212;
+            cbHasPetBonus.Width = 140;
+            miscPanel.Controls.Add(cbHasPetBonus);
             miscPanel.Height = Math.Max(miscPanel.Height, 92 + ((existing.Length + 1) / 2) * 30 + 8);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
