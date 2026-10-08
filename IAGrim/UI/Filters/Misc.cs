@@ -15,8 +15,9 @@ namespace IAGrim.UI.Filters {
         private FirefoxCheckBox? cbExcludeMonsterInfrequents;
         public Misc() {
             InitializeComponent();
-            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 505);
-            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 538);
+            miscPanel.Height = Math.Max(miscPanel.Height, 970);
+            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 866);
+            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 899);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
