@@ -37,7 +37,7 @@ namespace IAGrim.UI.Filters {
                 existing[i].Top = 92 + row * 30;
                 existing[i].Width = 140;
             }
-            miscPanel.Height = Math.Max(miscPanel.Height, 92 + ((existing.Count + 1) / 2) * 30 + 8);
+            miscPanel.Height = Math.Max(miscPanel.Height, 92 + ((existing.Length + 1) / 2) * 30 + 8);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
