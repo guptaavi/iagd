@@ -62,6 +62,9 @@ namespace IAGrim.Database.Dto {
 
         public bool WithSummonerSkillOnly { get; set; }
 
+        public bool MonsterInfrequentOnly { get; set; }
+        public bool ExcludeMonsterInfrequents { get; set; }
+
         public bool IsEmpty {
             get {
                 if (!String.IsNullOrEmpty(Wildcard))
@@ -75,6 +78,8 @@ namespace IAGrim.Database.Dto {
                 if (PetBonuses || HasPetBonus || IsRetaliation || Classes.Count > 0 || SocketedOnly || RecentOnly)
                     return false;
                 if (WithGrantSkillsOnly || WithSummonerSkillOnly || DuplicatesOnly || PrefixRarity > 0)
+                    return false;
+                if (MonsterInfrequentOnly || ExcludeMonsterInfrequents)
                     return false;
                 if (StatValueFilters?.Count > 0)
                     return false;

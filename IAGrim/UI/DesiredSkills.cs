@@ -61,6 +61,8 @@ namespace IAGrim.UI
                 DesiredClass = _classesFilters.DesiredClasses,
                 GrantsSkill = _miscFilter.GrantsSkill,
                 WithSummonerSkillOnly = _miscFilter.WithSummonerSkillOnly,
+                MonsterInfrequentOnly = _miscFilter.MonsterInfrequentOnly,
+                ExcludeMonsterInfrequents = _miscFilter.ExcludeMonsterInfrequents,
             };
 
         public event EventHandler<FilterEventArgs>? OnChanged;

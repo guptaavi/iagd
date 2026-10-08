@@ -844,6 +844,11 @@ namespace IAGrim.Database {
                 queryParams.Add("prefixRarity", query.PrefixRarity);
             }
 
+            if (query.MonsterInfrequentOnly || query.ExcludeMonsterInfrequents) {
+                var miSql = RecordStatSubquery("dbs.stat = 'itemSkillName'");
+                queryFragments.Add($"PI.Id {(query.ExcludeMonsterInfrequents ? "NOT " : "")}IN ({miSql})");
+            }
+
             if (query.SocketedOnly) {
                 queryFragments.Add("PI.MateriaRecord is not null and PI.MateriaRecord != ''");
             }

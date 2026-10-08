@@ -11,8 +11,12 @@ using IAGrim.Services.ItemStats;
 
 namespace IAGrim.UI.Filters {
     public partial class Misc : UserControl {
+        private FirefoxCheckBox? cbMonsterInfrequents;
+        private FirefoxCheckBox? cbExcludeMonsterInfrequents;
         public Misc() {
             InitializeComponent();
+            cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 505);
+            cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 538);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
@@ -37,6 +41,24 @@ namespace IAGrim.UI.Filters {
         public bool RecentOnly => cbRecentOnly.Checked;
         public bool GrantsSkill => cbGrantsSkill.Checked;
         public bool WithSummonerSkillOnly => cbSummonerSkill.Checked;
+        public bool MonsterInfrequentOnly => cbMonsterInfrequents?.Checked == true;
+        public bool ExcludeMonsterInfrequents => cbExcludeMonsterInfrequents?.Checked == true;
+
+        private FirefoxCheckBox CreateMiCheckBox(string text, int y) {
+            var cb = new FirefoxCheckBox {
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                AutoSize = false,
+                Bold = false,
+                EnabledCalc = true,
+                Font = new Font("Segoe UI", 10F),
+                Location = new Point(3, y),
+                Size = new Size(272, 27),
+                Text = text,
+                UseVisualStyleBackColor = true,
+            };
+            miscPanel.Controls.Add(cb);
+            return cb;
+        }
 
 
         public List<string[]> Filters {

@@ -515,7 +515,9 @@ namespace IAGrim.UI.Tabs {
                 SocketedOnly = filters.SocketedOnly,
                 RecentOnly = filters.RecentOnly,
                 WithGrantSkillsOnly = filters.GrantsSkill,
-                WithSummonerSkillOnly = filters.WithSummonerSkillOnly
+                WithSummonerSkillOnly = filters.WithSummonerSkillOnly,
+                MonsterInfrequentOnly = filters.MonsterInfrequentOnly,
+                ExcludeMonsterInfrequents = filters.ExcludeMonsterInfrequents
             };
 
             if (item != null) {

@@ -28,6 +28,9 @@ namespace IAGrim.UI
 
         public bool WithSummonerSkillOnly { get; set; }
 
+        public bool MonsterInfrequentOnly { get; set; }
+        public bool ExcludeMonsterInfrequents { get; set; }
+
         public List<string>? DesiredClass { get; set; }
     }
 }
