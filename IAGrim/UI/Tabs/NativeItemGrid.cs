@@ -203,32 +203,41 @@ namespace IAGrim.UI.Tabs {
             var copy = new ToolStripMenuItem("Copy item name");
             copy.Click += (_, _) => WithSelectedRow(row => Clipboard.SetText(row.Name));
 
-            var transferAll = new ToolStripMenuItem("Transfer all displayed items to game stash");
-            transferAll.Click += (_, _) => {
-                var items = _rows
-                    .Select(row => row.Item)
-                    .Where(item => item.URL is { Length: > 0 })
-                    .ToList();
-                if (items.Count == 0) {
-                    return;
-                }
-
-                var answer = MessageBox.Show(
-                    $"Transfer all {items.Count} displayed items to the in-game stash?",
-                    "Confirm bulk transfer",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button2);
-                if (answer == DialogResult.Yes) {
-                    OnTransferAll?.Invoke(items);
-                }
-            };
+            var transferBatch = new ToolStripMenuItem("Transfer batch to game stash");
+            foreach (var batchSize in new[] { 20, 50, 100 }) {
+                var size = batchSize;
+                transferBatch.DropDownItems.Add(new ToolStripMenuItem($"Transfer up to {size} items") {
+                    Tag = size,
+                });
+                transferBatch.DropDownItems[^1].Click += (_, _) => TransferDisplayedBatch(size);
+            }
 
             menu.Items.Add(lookup);
             menu.Items.Add(copy);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(transferAll);
+            menu.Items.Add(transferBatch);
             return menu;
+        }
+
+        private void TransferDisplayedBatch(int batchSize) {
+            var items = _rows
+                .Select(row => row.Item)
+                .Where(item => item.URL is { Length: > 0 })
+                .Take(batchSize)
+                .ToList();
+            if (items.Count == 0) {
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                $"Transfer up to {batchSize} items?\n\nThis batch contains {items.Count} matching item rows. Each row's full stack will be transferred.",
+                "Confirm batch transfer",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer == DialogResult.Yes) {
+                OnTransferAll?.Invoke(items);
+            }
         }
 
         /// <summary>
