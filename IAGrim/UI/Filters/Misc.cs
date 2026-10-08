@@ -21,7 +21,6 @@ namespace IAGrim.UI.Filters {
                 control.Top += 66;
             }
             miscPanel.AutoSize = true;
-            miscPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 32);
             cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 65);
             health.SupportsNumericFilter = true;
