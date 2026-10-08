@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using IAGrim.UI.Controller.dto;
+using IAGrim.Utilities;
 using log4net;
 
 namespace IAGrim.UI.Tabs {
@@ -82,6 +83,8 @@ namespace IAGrim.UI.Tabs {
         public Action<JsonItem, bool>? OnTransfer;
         /// <summary>Raised by the bulk action for all currently displayed rows.</summary>
         public Action<IReadOnlyList<JsonItem>>? OnTransferAll;
+        /// <summary>Raised when a bounded set of persistent Junk rows should go to the player's bags.</summary>
+        public Action<IReadOnlyList<JsonItem>, int>? OnTransferToBags;
         public Action? OnRequestMore;
         private bool _hasMore;
         private bool _requestingMore;
@@ -133,6 +136,7 @@ namespace IAGrim.UI.Tabs {
             AddColumn(nameof(ItemRow.Quality), "Rarity", 12);
             AddColumn(nameof(ItemRow.Level), "Level", 8);
             AddColumn(nameof(ItemRow.Slot), "Slot", 20);
+            AddColumn(nameof(ItemRow.Junk), "Junk", 7);
             AddColumn(nameof(ItemRow.Count), "#", 6);
 
             _details = new RichTextBox {
@@ -212,11 +216,74 @@ namespace IAGrim.UI.Tabs {
                 transferBatch.DropDownItems[^1].Click += (_, _) => TransferDisplayedBatch(size);
             }
 
+            var markBatch = new ToolStripMenuItem("Mark displayed items as Junk");
+            foreach (var batchSize in new[] { 20, 50, 100 }) {
+                var size = batchSize;
+                markBatch.DropDownItems.Add(new ToolStripMenuItem($"Mark up to {size} items") { Tag = size });
+                markBatch.DropDownItems[^1].Click += (_, _) => MarkDisplayedBatch(size);
+            }
+            markBatch.DropDownItems.Add(new ToolStripMenuItem("Mark all currently loaded items"));
+            markBatch.DropDownItems[^1].Click += (_, _) => MarkDisplayedBatch(int.MaxValue);
+
+            var unmark = new ToolStripMenuItem("Unmark selected item as Junk");
+            unmark.Click += (_, _) => WithSelectedRow(row => {
+                if (row.Item.PlayerItemId is { } id) {
+                    JunkItemStore.Remove(id);
+                    row.Item.IsJunk = false;
+                    ApplySortAndBind();
+                }
+            });
+
+            var transferJunk = new ToolStripMenuItem("Transfer Junk to player bags");
+            foreach (var batchSize in new[] { 20, 50, 100 }) {
+                var size = batchSize;
+                transferJunk.DropDownItems.Add(new ToolStripMenuItem($"Transfer up to {size} items") { Tag = size });
+                transferJunk.DropDownItems[^1].Click += (_, _) => TransferJunkBatch(size);
+            }
+
             menu.Items.Add(lookup);
             menu.Items.Add(copy);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(transferBatch);
+            menu.Items.Add(markBatch);
+            menu.Items.Add(unmark);
+            menu.Items.Add(transferJunk);
             return menu;
+        }
+
+        private void MarkDisplayedBatch(int batchSize) {
+            var items = _rows
+                .Select(row => row.Item)
+                .Where(item => item.PlayerItemId.HasValue && !item.IsJunk)
+                .Take(batchSize)
+                .ToList();
+            if (items.Count == 0) return;
+
+            JunkItemStore.Add(items.Select(item => item.PlayerItemId!.Value));
+            foreach (var item in items) item.IsJunk = true;
+            ApplySortAndBind();
+        }
+
+        private void TransferJunkBatch(int batchSize) {
+            var items = _rows
+                .Select(row => row.Item)
+                .Where(item => item.PlayerItemId.HasValue && item.IsJunk)
+                .Take(batchSize)
+                .ToList();
+            if (items.Count == 0) {
+                MessageBox.Show("No marked Junk items are visible in the current results page.", "Transfer Junk", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                $"Queue up to {batchSize} Junk items for the player bags?\n\nThis selects {items.Count} visible item rows. The game will stop at the first full bag and leave the rest recoverable.",
+                "Confirm bag transfer",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer == DialogResult.Yes) {
+                OnTransferToBags?.Invoke(items, batchSize);
+            }
         }
 
         private void TransferDisplayedBatch(int batchSize) {
@@ -867,7 +934,10 @@ namespace IAGrim.UI.Tabs {
                 Quality = item.Quality ?? string.Empty;
                 Level = (int)item.Level;
                 Slot = PrettySlot(item.Slot);
+                Junk = item.IsJunk ? "Junk" : string.Empty;
             }
+
+            public string Junk { get; }
 
             /// <summary>Slots arrive as raw record names ("OneShot_Scroll", "ArmorTorso_Chest").</summary>
             private static string PrettySlot(string? slot) {

@@ -80,6 +80,8 @@ namespace GAME
 	struct ItemEquipment { void* dummy; };
 	struct GraphicsTexture { void* dummy; };
 	struct Player { void* dummy; };
+	struct ControllerPlayer { void* dummy; };
+	struct PlayerInventoryCtrl { void* dummy; };
 	struct GameEngine { void* dummy; };
 	struct GameInfo { void* dummy; };
 	struct Engine { void* dummy; };
@@ -209,6 +211,30 @@ static auto fnItemGetItemReplicaInfo = ItemGetItemReplicaInfo(GetProcAddressOrLo
 
 typedef GAME::Player* (__fastcall* pGetMainPlayer)(GAME::GameEngine*);
 static auto fnGetMainPlayer = pGetMainPlayer(GetProcAddressOrLogToFile(L"game.dll", "?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ"));
+
+typedef GAME::ControllerPlayer* (__fastcall* pPlayerGetController)(GAME::Player*);
+static auto fnPlayerGetController = pPlayerGetController(GetProcAddressOrLogToFile(L"game.dll", "?GetController@?$ControllerAIStateT@VControllerPlayer@GAME@@VPlayer@2@@GAME@@IEAAAEAVControllerPlayer@2@XZ"));
+
+typedef GAME::PlayerInventoryCtrl* (__fastcall* pControllerGetInventoryCtrl)(GAME::ControllerPlayer*);
+static auto fnControllerGetInventoryCtrl = pControllerGetInventoryCtrl(GetProcAddressOrLogToFile(L"game.dll", "?GetInventoryCtrl@ControllerPlayer@GAME@@QEAAAEAVPlayerInventoryCtrl@2@XZ"));
+
+typedef unsigned int (__fastcall* pPlayerInventoryCtrl_GetNumberOfSacks)(const GAME::PlayerInventoryCtrl*);
+static auto fnPlayerInventoryCtrl_GetNumberOfSacks = pPlayerInventoryCtrl_GetNumberOfSacks(GetProcAddressOrLogToFile(L"game.dll", "?GetNumberOfSacks@PlayerInventoryCtrl@GAME@@QEBAIXZ"));
+
+typedef GAME::InventorySack* (__fastcall* pPlayerInventoryCtrl_GetSack)(GAME::PlayerInventoryCtrl*, int);
+static auto fnPlayerInventoryCtrl_GetSack = pPlayerInventoryCtrl_GetSack(GetProcAddressOrLogToFile(L"game.dll", "?GetSack@PlayerInventoryCtrl@GAME@@QEAAPEAVInventorySack@2@H@Z"));
+
+typedef bool (__fastcall* pInventorySackContainsItem)(GAME::InventorySack*, unsigned int);
+static auto fnInventorySackContainsItem = pInventorySackContainsItem(GetProcAddressOrLogToFile(L"game.dll", "?ContainsItem@InventorySack@GAME@@QEBA_NI@Z"));
+
+typedef bool (__fastcall* pPlayerSaleRequest)(GAME::GameEngine*, unsigned int, unsigned int, bool);
+static auto fnPlayerSaleRequest = pPlayerSaleRequest(GetProcAddressOrLogToFile(L"game.dll", "?PlayerSaleRequest@GameEngine@GAME@@QEAA_NII_N@Z"));
+
+typedef bool (__fastcall* pPlayerInventoryRemoveItem)(GAME::PlayerInventoryCtrl*, unsigned int, bool);
+static auto fnPlayerInventoryRemoveItem = pPlayerInventoryRemoveItem(GetProcAddressOrLogToFile(L"game.dll", "?RemoveItem@PlayerInventoryCtrl@GAME@@QEAA_NI_N@Z"));
+
+typedef void (__fastcall* pSendRemoveItem)(void*, unsigned int);
+static auto fnSendRemoveItem = pSendRemoveItem(GetProcAddressOrLogToFile(L"game.dll", "?SendRemoveItemFromInventory@ControllerCharacter@GAME@@QEAAXI@Z"));
 
 
 typedef void(__fastcall* pGetModNameArg)(GAME::GameInfo* gi, std::wstring* str);

@@ -61,11 +61,15 @@ namespace IAGrim.Utilities {
 
             bool isHardcore = false;
             bool isCloudSynced = false;
+            long? playerItemId = null;
+            bool isJunk = false;
             object[] transferUrl = { "", "", "", "" };
             string uniqueIdentifier = GetUniqueIdentifier(item);
             List<ItemStatInfo>? replicaStats = null;
             var mergeIdentifier = item.BaseRecord ?? string.Empty;
             if (item is PlayerItem pi) {
+                playerItemId = pi.Id;
+                isJunk = JunkItemStore.Contains(pi.Id);
                 transferUrl = new object[] { pi.BaseRecord ?? "", pi.PrefixRecord ?? "", pi.SuffixRecord ?? "", pi.MateriaRecord ?? "", pi.Mod ?? "", pi.IsHardcore };
                 isCloudSynced = pi.IsCloudSynchronized;
                 isHardcore = pi.IsHardcore;
@@ -117,6 +121,8 @@ namespace IAGrim.Utilities {
 
             var json = new JsonItem {
                 UniqueIdentifier = uniqueIdentifier,
+                PlayerItemId = playerItemId,
+                IsJunk = isJunk,
                 MergeIdentifier = mergeIdentifier,
                 BaseRecord = item.BaseRecord ?? string.Empty,
                 URL = transferUrl,

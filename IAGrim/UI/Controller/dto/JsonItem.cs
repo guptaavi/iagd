@@ -6,6 +6,10 @@ namespace IAGrim.UI.Controller.dto {
 
     public class JsonItem : IComparable<JsonItem> {
         public string? UniqueIdentifier { get; set; }
+        /// <summary>Database identity of an owned player item. Database items and buddy items leave this null.</summary>
+        public long? PlayerItemId { get; set; }
+        /// <summary>Whether this owned item is in IA's persistent Junk set.</summary>
+        public bool IsJunk { get; set; }
         /// <summary>
         /// Used to identify "identical" items which can be merged in the UI
         /// </summary>

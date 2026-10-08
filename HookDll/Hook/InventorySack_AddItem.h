@@ -37,6 +37,12 @@ private:
 
 	static bool m_isTransferStashOpen;
 	static std::set<std::wstring> m_depositQueue;
+	static std::set<std::wstring> m_bagQueue;
+	static std::set<unsigned int> m_nativeJunkIds;
+	static bool m_nativeJunkLoaded;
+	static bool m_marketOpen;
+	static unsigned int m_vendorId;
+	static GAME::GameEngine* m_marketEngine;
 	static boost::mutex m_mutex;
 
 
@@ -57,6 +63,13 @@ private:
 	typedef bool(__thiscall* GameInfo_GetHardcore)(void*);
 	typedef int* (__thiscall* GameEngine_Update)(void* This, int v);
 	typedef char* (__thiscall* GameEngine_GetGameInfo)(void* This);
+	typedef void (__thiscall* GameEngine_OpenMarket)(void*, unsigned int, int*, void*);
+	typedef void (__thiscall* GameEngine_CloseMarket)(void*, unsigned int);
+	typedef void (__thiscall* PlayerInventoryCtrl_DepositReagents)(void*);
+	typedef bool (__thiscall* GameEngine_PlayerSaleRequest)(void*, unsigned int, unsigned int, bool);
+	typedef bool (__thiscall* PlayerInventoryCtrl_RemoveItem)(void*, unsigned int, bool);
+	typedef void (__thiscall* ControllerCharacter_SendRemoveItemFromInventory)(void*, unsigned int);
+	typedef bool (__thiscall* InventorySack_ContainsItem)(void*, unsigned int);
 
 
 	// Hook variable defs
@@ -71,6 +84,13 @@ private:
 	static std::wstring m_storageFolder;
 	static ULONGLONG m_lastNotificationTickTime;
 	static InventorySack_FindNextPosition dll_InventorySack_FindNextPosition;
+	static GameEngine_OpenMarket dll_GameEngine_OpenMarket;
+	static GameEngine_CloseMarket dll_GameEngine_CloseMarket;
+	static PlayerInventoryCtrl_DepositReagents dll_PlayerInventoryCtrl_DepositReagents;
+	static GameEngine_PlayerSaleRequest dll_GameEngine_PlayerSaleRequest;
+	static PlayerInventoryCtrl_RemoveItem dll_PlayerInventoryCtrl_RemoveItem;
+	static ControllerCharacter_SendRemoveItemFromInventory dll_ControllerCharacter_SendRemoveItemFromInventory;
+	static InventorySack_ContainsItem dll_InventorySack_ContainsItem;
 
 
 	// Hook proxy methods
@@ -79,6 +99,9 @@ private:
 	static void* __fastcall Hooked_InventorySack_AddItem_Vec2(void* This, void*, GAME::Item* item, bool SkipPlaySound);
 	static void* __fastcall Hooked_InventorySack_SetTransferOpen(void* This, bool isOpen);
 	static void* __fastcall Hooked_GameEngine_Update(void* This, int v);
+	static void __fastcall Hooked_GameEngine_OpenMarket(void* This, unsigned int who, int* marketType, void* at);
+	static void __fastcall Hooked_GameEngine_CloseMarket(void* This, unsigned int who);
+	static void __fastcall Hooked_PlayerInventoryCtrl_DepositReagents(void* This);
 
 
 	// Helper/internal methods
@@ -89,6 +112,10 @@ private:
 	static bool IsSackToLootFrom(void* stash, GAME::GameEngine* gameEngine);
 	static GAME::InventorySack* GetSackToDepositTo(GAME::GameEngine* gameEngine);
 	static GAME::ItemReplicaInfo* ReadReplicaInfo(const std::wstring& filename);
+	static bool ProcessBagItem(GAME::GameEngine* gameEngine, const std::wstring& filename);
+	static void LoadNativeJunkIds();
+	static void SaveNativeJunkIds();
+	static bool SellNativeJunk(GAME::PlayerInventoryCtrl* inventory);
 
 
 	

@@ -82,6 +82,31 @@ namespace IAGrim.Utilities {
             }
         }
 
+        /// <summary>Separate from stash transfer: bag transfer must wait for a native game acknowledgement.</summary>
+        public static string CsvLocationOutgoingBags {
+            get {
+                string path = Path.Combine(CsvLocation, "outgoing-bags");
+                Directory.CreateDirectory(path);
+                return path;
+            }
+        }
+
+        public static string CsvLocationCompletedBags {
+            get {
+                string path = Path.Combine(CsvLocation, "completed-bags");
+                Directory.CreateDirectory(path);
+                return path;
+            }
+        }
+
+        public static string CsvLocationFailedBags {
+            get {
+                string path = Path.Combine(CsvLocation, "failed-bags");
+                Directory.CreateDirectory(path);
+                return path;
+            }
+        }
+
         public static string CsvLocationIngoingDeleted {
             get {
                 string path = Path.Combine(CsvLocation, "ingoing", "deleted");

@@ -18,6 +18,7 @@ namespace IAGrim.UI.Misc.CEF {
         };
 
         public event EventHandler<StashTransferEventArgs>? ItemTransferEvent;
+        public event EventHandler<BagTransferEventArgs>? BagTransferEvent;
         public event EventHandler<ClipboardEventArg>? OnClipboard;
         public event EventHandler? OnRequestItems;
         public event EventHandler? OnRequestCollectionData;
@@ -39,6 +40,16 @@ namespace IAGrim.UI.Misc.CEF {
             };
 
             return JsonConvert.SerializeObject(ret, _settings);
+        }
+
+        public string TransferItemsToBags(long[] playerItemIds, int batchSize) {
+            var allowedBatchSize = batchSize is 20 or 50 or 100 ? batchSize : 20;
+            var args = new BagTransferEventArgs(playerItemIds, allowedBatchSize);
+            BagTransferEvent?.Invoke(this, args);
+            return JsonConvert.SerializeObject(new Dictionary<string, object> {
+                { "success", args.IsSuccessful },
+                { "numQueued", args.NumQueued }
+            }, _settings);
         }
 
         public string GetTranslationStrings() {

@@ -756,6 +756,7 @@ namespace IAGrim.UI {
             }
 
             searchController.JsIntegration.ItemTransferEvent += TransferItem;
+            searchController.JsIntegration.BagTransferEvent += TransferItemsToBags;
             new WindowSizeManager(this, settingsService);
 
 
@@ -825,6 +826,12 @@ namespace IAGrim.UI {
 
             if (args is StashTransferEventArgs transferArgs) {
                 _transferController.TransferItem(transferArgs);
+            }
+        }
+
+        void TransferItemsToBags(object? ignored, EventArgs args) {
+            if (_transferController != null && args is BagTransferEventArgs bagArgs) {
+                _transferController.TransferItemsToBags(bagArgs);
             }
         }
 

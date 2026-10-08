@@ -20,6 +20,8 @@ namespace IAGrim.UI.Controller {
         private readonly CefBrowserHandler _browser;
         private readonly TransferStashService _transferStashService;
         private readonly SettingsService _settingsService;
+        private readonly System.Threading.Timer _bagAckTimer;
+        private int _processingBagAcks;
 
         /// <summary>
         /// Raised after items have been transferred back in-game and removed locally, carrying the cloud ids of the removed items so the deletion can be synced live.
@@ -45,6 +47,11 @@ namespace IAGrim.UI.Controller {
             _dao = playerItemDao;
             _transferStashService = transferStashService;
             _settingsService = settingsService;
+
+            // Bag transfers are acknowledged by the native hook on the game's update thread. Keep the DB
+            // item until that acknowledgement arrives; this also makes a full bag recoverable rather than
+            // silently deleting the item from IA.
+            _bagAckTimer = new System.Threading.Timer(_ => ProcessBagAcknowledgements(), null, 1000, 1000);
         }
 
 
@@ -142,6 +149,64 @@ namespace IAGrim.UI.Controller {
                 Logger.Warn("Could not find any items for the requested transfer");
                 _browser.ShowMessage(RuntimeSettings.Language!.GetTag("iatag_feedback_unable_to_deposit"), UserFeedbackLevel.Warning);
 
+            }
+        }
+
+        /// <summary>Queue a bounded batch for the player's bags; deletion waits for native success.</summary>
+        public void TransferItemsToBags(BagTransferEventArgs args) {
+            var items = args.PlayerItemIds
+                .Take(args.BatchSize)
+                .Distinct()
+                .Select(id => _dao.GetById(id))
+                .Where(item => item != null && item.StackCount > 0)
+                .ToList();
+
+            if (items.Count == 0) {
+                _browser.ShowMessage("No owned items were available for bag transfer.", UserFeedbackLevel.Warning);
+                return;
+            }
+
+            args.NumQueued = _transferStashService.DepositToPlayerBags(items);
+            args.IsSuccessful = args.NumQueued > 0;
+            if (args.IsSuccessful) {
+                _browser.ShowMessage($"Queued {args.NumQueued} item stack(s) for the player bags. Full bags remain recoverable.", UserFeedbackLevel.Success);
+            }
+        }
+
+        private void ProcessBagAcknowledgements() {
+            if (Interlocked.Exchange(ref _processingBagAcks, 1) != 0) {
+                return;
+            }
+
+            try {
+                foreach (var file in Directory.EnumerateFiles(GlobalPaths.CsvLocationCompletedBags, "*.csv", SearchOption.AllDirectories)) {
+                    var name = Path.GetFileNameWithoutExtension(file);
+                    var separator = name.IndexOf('_');
+                    if (separator <= 0 || !long.TryParse(name[..separator], out var id)) {
+                        Logger.Warn($"Ignoring completed bag acknowledgement with invalid name: {file}");
+                        continue;
+                    }
+
+                    var item = _dao.GetById(id);
+                    if (item != null) {
+                        var cloudId = item.CloudId;
+                        item.StackCount = 0;
+                        _dao.Update(new List<PlayerItem> { item }, true);
+                        JunkItemStore.Remove(id);
+                        if (!string.IsNullOrEmpty(cloudId)) {
+                            OnItemsTransferredToGame?.Invoke(this, new ItemsTransferredEventArgs(new List<string> { cloudId }));
+                        }
+                        Logger.Info($"Native hook acknowledged player-bag transfer for item {id}");
+                    }
+
+                    File.Delete(file);
+                }
+            }
+            catch (Exception ex) {
+                Logger.Warn($"Could not process player-bag acknowledgements: {ex.Message}");
+            }
+            finally {
+                Volatile.Write(ref _processingBagAcks, 0);
             }
         }
     }

@@ -38,6 +38,35 @@ namespace IAGrim.Parsers.Arz {
                     
         }
 
+        /// <summary>
+        /// Queue complete item stacks for the player's bags. Unlike Deposit(), this does not alter the local
+        /// database: the native hook must first report that the game accepted each file.
+        /// </summary>
+        public int DepositToPlayerBags(IList<PlayerItem> playerItems) {
+            var queued = 0;
+            foreach (var item in playerItems) {
+                try {
+                    var path = Path.Combine(GlobalPaths.CsvLocationOutgoingBags, item.IsHardcore ? "hc" : "sc");
+                    if (!string.IsNullOrEmpty(item.Mod)) {
+                        path = Path.Combine(path, item.Mod);
+                    }
+                    Directory.CreateDirectory(path);
+
+                    // The DB id is deliberately in the filename so the completed-bag acknowledgement can
+                    // remove exactly this row after the game accepts it. The CSV itself has no DB identity.
+                    var csvFilename = Path.Combine(path, $"{item.Id}_{Guid.NewGuid():N}.csv");
+                    File.WriteAllText(csvFilename, CsvParsingService.Serialize(item));
+                    Logger.Info($"Queued item {item.Id} for player bags: {csvFilename}");
+                    queued++;
+                }
+                catch (IOException e) {
+                    Logger.Warn(e.Message, e);
+                }
+            }
+
+            return queued;
+        }
+
 
         public static PlayerItem Map(Item item, string? mod, bool isHardcore) {
             return new PlayerItem {

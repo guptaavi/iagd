@@ -381,6 +381,15 @@ namespace IAGrim.UI.Tabs {
                     }
                     UpdateListViewDelayed();
                 },
+                OnTransferToBags = (items, batchSize) => {
+                    var ids = items
+                        .Where(item => item.PlayerItemId.HasValue)
+                        .Select(item => item.PlayerItemId!.Value)
+                        .ToArray();
+                    if (ids.Length > 0) {
+                        _searchController.JsIntegration.TransferItemsToBags(ids, batchSize);
+                    }
+                },
                 OnRequestMore = () => _searchController.JsIntegration.RequestMoreItems()
             };
 

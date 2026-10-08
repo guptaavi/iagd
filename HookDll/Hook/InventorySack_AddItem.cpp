@@ -42,6 +42,13 @@ InventorySack_AddItem::InventorySack_AddItem_Drop InventorySack_AddItem::dll_Inv
 InventorySack_AddItem::InventorySack_AddItem_Vec2 InventorySack_AddItem::dll_InventorySack_AddItem_Vec2;
 InventorySack_AddItem::InventorySack_SetTransferOpen InventorySack_AddItem::dll_InventorySack_SetTransferOpen;
 InventorySack_AddItem::InventorySack_FindNextPosition InventorySack_AddItem::dll_InventorySack_FindNextPosition;
+InventorySack_AddItem::GameEngine_OpenMarket InventorySack_AddItem::dll_GameEngine_OpenMarket;
+InventorySack_AddItem::GameEngine_CloseMarket InventorySack_AddItem::dll_GameEngine_CloseMarket;
+InventorySack_AddItem::PlayerInventoryCtrl_DepositReagents InventorySack_AddItem::dll_PlayerInventoryCtrl_DepositReagents;
+InventorySack_AddItem::GameEngine_PlayerSaleRequest InventorySack_AddItem::dll_GameEngine_PlayerSaleRequest;
+InventorySack_AddItem::PlayerInventoryCtrl_RemoveItem InventorySack_AddItem::dll_PlayerInventoryCtrl_RemoveItem;
+InventorySack_AddItem::ControllerCharacter_SendRemoveItemFromInventory InventorySack_AddItem::dll_ControllerCharacter_SendRemoveItemFromInventory;
+InventorySack_AddItem::InventorySack_ContainsItem InventorySack_AddItem::dll_InventorySack_ContainsItem;
 std::wstring InventorySack_AddItem::m_storageFolder;
 int InventorySack_AddItem::m_stashTabLootFrom;
 int InventorySack_AddItem::m_stashTabDepositTo;
@@ -54,6 +61,12 @@ InventorySack_AddItem::GameEngine_Update InventorySack_AddItem::dll_GameEngine_U
 bool InventorySack_AddItem::m_isTransferStashOpen;
 
 std::set<std::wstring> InventorySack_AddItem::m_depositQueue;
+std::set<std::wstring> InventorySack_AddItem::m_bagQueue;
+std::set<unsigned int> InventorySack_AddItem::m_nativeJunkIds;
+bool InventorySack_AddItem::m_nativeJunkLoaded;
+bool InventorySack_AddItem::m_marketOpen;
+unsigned int InventorySack_AddItem::m_vendorId;
+GAME::GameEngine* InventorySack_AddItem::m_marketEngine;
 boost::mutex InventorySack_AddItem::m_mutex;
 
 void InventorySack_AddItem::EnableHook() {
@@ -107,6 +120,37 @@ void InventorySack_AddItem::EnableHook() {
 	dll_GameInfo_GetHardcore = (GameInfo_GetHardcore)GetProcAddressOrLogToFile(L"Engine.dll", GET_HARDCORE);
 	dll_InventorySack_FindNextPosition = (InventorySack_FindNextPosition)GetProcAddressOrLogToFile(L"Game.dll", "?FindNextPosition@InventorySack@GAME@@IEBA_NPEBVItem@2@AEAVRect@2@_N@Z");
 
+	// The vendor action is deliberately tied to the game's own Move Reagents button. The button's normal
+	// confirmation remains in charge; after the player confirms, this hook swaps only the action when a vendor
+	// is open and IA has native Junk ids.
+	dll_GameEngine_OpenMarket = (GameEngine_OpenMarket)GetProcAddressOrLogToFile(L"Game.dll", "?OpenMarket@GameEngine@GAME@@QEAAXIAEAW4Market_TypeEnum@2@AEBVVec2@2@@Z");
+	dll_GameEngine_CloseMarket = (GameEngine_CloseMarket)GetProcAddressOrLogToFile(L"Game.dll", "?CloseMarket@GameEngine@GAME@@QEAAXI@Z");
+	dll_PlayerInventoryCtrl_DepositReagents = (PlayerInventoryCtrl_DepositReagents)GetProcAddressOrLogToFile(L"Game.dll", "?DepositReagents@PlayerInventoryCtrl@GAME@@QEAAXXZ");
+	dll_GameEngine_PlayerSaleRequest = (GameEngine_PlayerSaleRequest)GetProcAddressOrLogToFile(L"Game.dll", "?PlayerSaleRequest@GameEngine@GAME@@QEAA_NII_N@Z");
+	dll_PlayerInventoryCtrl_RemoveItem = (PlayerInventoryCtrl_RemoveItem)GetProcAddressOrLogToFile(L"Game.dll", "?RemoveItem@PlayerInventoryCtrl@GAME@@QEAA_NI_N@Z");
+	dll_ControllerCharacter_SendRemoveItemFromInventory = (ControllerCharacter_SendRemoveItemFromInventory)GetProcAddressOrLogToFile(L"Game.dll", "?SendRemoveItemFromInventory@ControllerCharacter@GAME@@QEAAXI@Z");
+	dll_InventorySack_ContainsItem = (InventorySack_ContainsItem)GetProcAddressOrLogToFile(L"Game.dll", "?ContainsItem@InventorySack@GAME@@QEBA_NI@Z");
+	LoadNativeJunkIds();
+
+	if (dll_GameEngine_OpenMarket != nullptr) {
+		DetourTransactionBegin();
+		DetourUpdateThread(GetCurrentThread());
+		DetourAttach((PVOID*)&dll_GameEngine_OpenMarket, Hooked_GameEngine_OpenMarket);
+		DetourTransactionCommit();
+	}
+	if (dll_GameEngine_CloseMarket != nullptr) {
+		DetourTransactionBegin();
+		DetourUpdateThread(GetCurrentThread());
+		DetourAttach((PVOID*)&dll_GameEngine_CloseMarket, Hooked_GameEngine_CloseMarket);
+		DetourTransactionCommit();
+	}
+	if (dll_PlayerInventoryCtrl_DepositReagents != nullptr) {
+		DetourTransactionBegin();
+		DetourUpdateThread(GetCurrentThread());
+		DetourAttach((PVOID*)&dll_PlayerInventoryCtrl_DepositReagents, Hooked_PlayerInventoryCtrl_DepositReagents);
+		DetourTransactionCommit();
+	}
+
 	
 	if (m_isGrimDawnParsed) {
 		LogToFile(LogLevel::INFO, L"Grim is parsed, displaying message..");
@@ -135,6 +179,10 @@ InventorySack_AddItem::InventorySack_AddItem(DataQueue* dataQueue, HANDLE hEvent
 	m_lastNotificationTickTime = 0;
 	m_isActive = false;
 	m_gameUpdateIterationsRun = 0;
+	m_nativeJunkLoaded = false;
+	m_marketOpen = false;
+	m_vendorId = 0;
+	m_marketEngine = nullptr;
 }
 
 InventorySack_AddItem::InventorySack_AddItem() {
@@ -655,6 +703,16 @@ std::wstring GetFolderToMoveTo(std::wstring modName, bool isHardcore) {
 	return folder;
 }
 
+/// <summary>Queue roots for the separate IA -> player-bag path.</summary>
+static std::wstring GetBagFolder(std::wstring modName, bool isHardcore, const wchar_t* root) {
+	std::wstring folder = GetIagdFolder() + L"itemqueue\\" + root + L"\\" + (isHardcore ? L"hc" : L"sc");
+	if (!modName.empty()) {
+		folder += L"\\" + modName;
+	}
+	boost::filesystem::create_directories(folder);
+	return folder;
+}
+
 /// <summary>
 /// Read a .CSV file into a GAME::ItemReplicaInfo object
 /// </summary>
@@ -677,6 +735,229 @@ GAME::ItemReplicaInfo* InventorySack_AddItem::ReadReplicaInfo(const std::wstring
 	}
 
 	return nullptr;
+}
+
+/// <summary>
+/// Add one queued item to the player's actual inventory sacks. This intentionally uses the same
+/// PlayerInventoryCtrl::GetNumberOfSacks/GetSack route as the game UI; Player::GetSack is a different
+/// collection and is not the visible personal bag inventory.
+/// </summary>
+bool InventorySack_AddItem::ProcessBagItem(GAME::GameEngine* gameEngine, const std::wstring& filename) {
+	if (gameEngine == nullptr || fnGetMainPlayer == nullptr || fnPlayerGetController == nullptr ||
+		fnControllerGetInventoryCtrl == nullptr || fnPlayerInventoryCtrl_GetNumberOfSacks == nullptr ||
+		fnPlayerInventoryCtrl_GetSack == nullptr || dll_InventorySack_FindNextPosition == nullptr ||
+		dll_InventorySack_AddItem_Vec2 == nullptr) {
+		LogToFile(LogLevel::WARNING, L"Player-bag transfer skipped: inventory exports are unavailable");
+		return false;
+	}
+
+	GAME::Player* player = fnGetMainPlayer(gameEngine);
+	GAME::ControllerPlayer* controller = player == nullptr ? nullptr : fnPlayerGetController(player);
+	GAME::PlayerInventoryCtrl* inventory = controller == nullptr ? nullptr : fnControllerGetInventoryCtrl(controller);
+	if (inventory == nullptr) {
+		return false;
+	}
+
+	const unsigned int sackCount = fnPlayerInventoryCtrl_GetNumberOfSacks(inventory);
+	if (sackCount == 0 || sackCount > 64) {
+		LogToFile(LogLevel::WARNING, L"Player-bag transfer found an implausible sack count: " + std::to_wstring(sackCount));
+		return false;
+	}
+
+	GAME::ItemReplicaInfo* replica = ReadReplicaInfo(filename);
+	if (replica == nullptr) {
+		return false;
+	}
+
+	bool accepted = false;
+	try {
+		GAME::Item* item = fnCreateItem(replica);
+		if (item != nullptr) {
+			for (unsigned int i = 0; i < sackCount && !accepted; ++i) {
+				GAME::InventorySack* sack = fnPlayerInventoryCtrl_GetSack(inventory, static_cast<int>(i));
+				if (sack == nullptr) {
+					continue;
+				}
+
+				GAME::Rect position;
+				if (dll_InventorySack_FindNextPosition(sack, item, &position, true)) {
+					// The existing typedef is intentionally pointer-shaped for the older hook ABI; the game
+					// returns a non-zero BOOL here, so null remains the failure result.
+					accepted = dll_InventorySack_AddItem_Vec2(sack, (void*)&position, item, false) != nullptr;
+				}
+			}
+
+			if (accepted && fnItemGetItemReplicaInfo != nullptr) {
+				// CreateItem assigns the live Grim Dawn item id. Keep that native id, not IA's database id,
+				// because the vendor sale API operates on the game's inventory objects.
+				GAME::ItemReplicaInfo liveReplica;
+				fnItemGetItemReplicaInfo(item, liveReplica);
+				if (liveReplica.id != 0) {
+					m_nativeJunkIds.insert(liveReplica.id);
+					SaveNativeJunkIds();
+					LogToFile(LogLevel::INFO, L"Marked newly inserted player-bag item as native Junk id " + std::to_wstring(liveReplica.id));
+				}
+			}
+		}
+	}
+	catch (...) {
+		LogToFile(LogLevel::WARNING, L"Exception while inserting an item into player bags");
+		accepted = false;
+	}
+
+	delete replica;
+	return accepted;
+}
+
+static std::wstring NativeJunkFile() {
+	return GetIagdFolder() + L"data\\native-junk-items.txt";
+}
+
+void InventorySack_AddItem::LoadNativeJunkIds() {
+	if (m_nativeJunkLoaded) {
+		return;
+	}
+
+	m_nativeJunkLoaded = true;
+	const std::wstring filename = NativeJunkFile();
+	std::wifstream file(filename);
+	std::wstring owner;
+	file >> owner;
+	if (owner != L"pid=" + std::to_wstring(GetCurrentProcessId())) {
+		// Native item ids are valid for this game process only. IA marks remain persistent, but an old
+		// process's numeric ids must never be reused to sell a different item after a game restart.
+		LogToFile(LogLevel::INFO, L"Ignoring native Junk marks from another game process");
+		return;
+	}
+	unsigned int id = 0;
+	while (file >> id) {
+		if (id != 0) m_nativeJunkIds.insert(id);
+	}
+	LogToFile(LogLevel::INFO, L"Loaded " + std::to_wstring(m_nativeJunkIds.size()) + L" native Junk item ids");
+}
+
+void InventorySack_AddItem::SaveNativeJunkIds() {
+	const std::wstring filename = NativeJunkFile();
+	boost::filesystem::create_directories(GetIagdFolder() + L"data\\");
+	const std::wstring temporary = filename + L".tmp";
+	std::wofstream file(temporary, std::ios::trunc);
+	if (!file) {
+		LogToFile(LogLevel::WARNING, L"Could not write native Junk marks: " + temporary);
+		return;
+	}
+	file << L"pid=" << GetCurrentProcessId() << L"\n";
+	for (const auto id : m_nativeJunkIds) {
+		file << id << L"\n";
+	}
+	file.close();
+	if (!MoveFileExW(temporary.c_str(), filename.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+		LogToFile(LogLevel::WARNING, L"Could not replace native Junk marks: " + filename);
+	}
+}
+
+bool InventorySack_AddItem::SellNativeJunk(GAME::PlayerInventoryCtrl* inventory) {
+	LoadNativeJunkIds();
+	if (!m_marketOpen || m_marketEngine == nullptr || m_vendorId == 0 || inventory == nullptr || m_nativeJunkIds.empty()) {
+		return false;
+	}
+	if (dll_GameEngine_PlayerSaleRequest == nullptr || dll_PlayerInventoryCtrl_RemoveItem == nullptr ||
+		dll_InventorySack_ContainsItem == nullptr || fnPlayerInventoryCtrl_GetNumberOfSacks == nullptr ||
+		fnPlayerInventoryCtrl_GetSack == nullptr) {
+		LogToFile(LogLevel::WARNING, L"Junk sale refused: required vendor or inventory export is unavailable");
+		return true;
+	}
+
+	GAME::Player* player = fnGetMainPlayer(m_marketEngine);
+	GAME::ControllerPlayer* controller = player == nullptr || fnPlayerGetController == nullptr
+		? nullptr : fnPlayerGetController(player);
+	if (controller == nullptr) {
+		LogToFile(LogLevel::WARNING, L"Junk sale refused: player controller is unavailable");
+		return true;
+	}
+
+	const unsigned int sackCount = fnPlayerInventoryCtrl_GetNumberOfSacks(inventory);
+	if (sackCount == 0 || sackCount > 64) {
+		return true;
+	}
+
+	std::vector<unsigned int> candidates;
+	std::vector<unsigned int> stale;
+	for (const auto id : m_nativeJunkIds) {
+		bool found = false;
+		for (unsigned int i = 0; i < sackCount && !found; ++i) {
+			GAME::InventorySack* sack = fnPlayerInventoryCtrl_GetSack(inventory, static_cast<int>(i));
+			found = sack != nullptr && dll_InventorySack_ContainsItem(sack, id);
+		}
+		if (found) candidates.push_back(id);
+		else stale.push_back(id);
+	}
+	for (const auto id : stale) m_nativeJunkIds.erase(id);
+
+	if (candidates.empty()) {
+		SaveNativeJunkIds();
+		return false;
+	}
+
+	int sold = 0;
+	for (const auto id : candidates) {
+		LogToFile(LogLevel::INFO, L"Selling native Junk item " + std::to_wstring(id) + L" to vendor " + std::to_wstring(m_vendorId));
+		if (!dll_GameEngine_PlayerSaleRequest(m_marketEngine, m_vendorId, id, false)) {
+			LogToFile(LogLevel::WARNING, L"Vendor refused native Junk item; stopping sale");
+			break;
+		}
+
+		if (!dll_PlayerInventoryCtrl_RemoveItem(inventory, id, true)) {
+			LogToFile(LogLevel::WARNING, L"Vendor paid but RemoveItem failed; stopping sale to avoid a duplicate sale");
+			break;
+		}
+
+		if (dll_ControllerCharacter_SendRemoveItemFromInventory != nullptr) {
+			dll_ControllerCharacter_SendRemoveItemFromInventory(controller, id);
+		}
+		m_nativeJunkIds.erase(id);
+		sold++;
+	}
+
+	SaveNativeJunkIds();
+	if (sold > 0) {
+		DisplayMessage(std::to_wstring(sold) + L" Junk item(s) sold", L"By Item Assistant");
+	}
+	return true;
+}
+
+void __fastcall InventorySack_AddItem::Hooked_GameEngine_OpenMarket(void* This, unsigned int who, int* marketType, void* at) {
+	m_marketOpen = true;
+	m_vendorId = who;
+	m_marketEngine = static_cast<GAME::GameEngine*>(This);
+	if (dll_GameEngine_OpenMarket != nullptr) {
+		dll_GameEngine_OpenMarket(This, who, marketType, at);
+	}
+}
+
+void __fastcall InventorySack_AddItem::Hooked_GameEngine_CloseMarket(void* This, unsigned int who) {
+	m_marketOpen = false;
+	m_vendorId = 0;
+	m_marketEngine = nullptr;
+	if (dll_GameEngine_CloseMarket != nullptr) {
+		dll_GameEngine_CloseMarket(This, who);
+	}
+}
+
+void __fastcall InventorySack_AddItem::Hooked_PlayerInventoryCtrl_DepositReagents(void* This) {
+	if (m_isActive && m_marketOpen) {
+		GAME::Player* player = m_marketEngine == nullptr ? nullptr : fnGetMainPlayer(m_marketEngine);
+		GAME::ControllerPlayer* controller = player == nullptr || fnPlayerGetController == nullptr
+			? nullptr : fnPlayerGetController(player);
+		GAME::PlayerInventoryCtrl* inventory = controller == nullptr || fnControllerGetInventoryCtrl == nullptr
+			? nullptr : fnControllerGetInventoryCtrl(controller);
+		if (SellNativeJunk(inventory)) {
+			return;
+		}
+	}
+
+	if (dll_PlayerInventoryCtrl_DepositReagents != nullptr) {
+		dll_PlayerInventoryCtrl_DepositReagents(This);
+	}
 }
 
 /// <summary>
@@ -786,6 +1067,33 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
 		bool isHardcore = false;
 		if (!GameContext::Resolve(gameInfo, modName, isHardcore)) {
 			return dll_GameEngine_Update(This, v);
+		}
+
+		// Player-bag transfers do not require the transfer stash to be open. They are kept separate from
+		// the older stash queue so a full personal inventory never deletes an IA item or blocks stash work.
+		{
+			boost::lock_guard<boost::mutex> guard(m_mutex);
+			if (!m_bagQueue.empty()) {
+				std::wstring completedFolder = GetBagFolder(modName, isHardcore, L"completed-bags");
+				for (auto it = m_bagQueue.begin(); it != m_bagQueue.end(); ++it) {
+					const bool accepted = ProcessBagItem((GAME::GameEngine*)This, *it);
+					if (accepted) {
+						const std::wstring target = completedFolder + L"\\" + boost::filesystem::path(*it).filename().wstring();
+						if (!MoveFile(it->c_str(), target.c_str())) {
+							LogToFile(LogLevel::WARNING, L"Failed moving player-bag queue file to acknowledgement folder: " + *it);
+						}
+						else {
+							LogToFile(LogLevel::INFO, L"Player-bag transfer accepted: " + target);
+						}
+					}
+					else {
+						// Leave the original file in outgoing-bags. The polling thread will retry on a later game
+						// update, which means freeing one bag slot automatically drains the remaining batch.
+						LogToFile(LogLevel::INFO, L"Player bags are full or unavailable; transfer remains queued: " + *it);
+					}
+				}
+				m_bagQueue.clear();
+			}
 		}
 
 		if (m_isTransferStashOpen) {
@@ -902,6 +1210,7 @@ void InventorySack_AddItem::ThreadMain(void*) {
 			}
 
 			std::wstring folder = GetFolderToLootFrom(modName, isHardcore);
+			std::wstring bagFolder = GetBagFolder(modName, isHardcore, L"outgoing-bags");
 			// LogToFile(std::wstring(L"Looking for files in dir: ") + folder);
 
 			for (auto& entry : boost::make_iterator_range(boost::filesystem::directory_iterator(folder), {})) {
@@ -917,6 +1226,17 @@ void InventorySack_AddItem::ThreadMain(void*) {
 						LogToFile(LogLevel::INFO, std::wstring(L"Ignoring file: ") + std::wstring(entry.path().c_str()));
 					}
 					knownFiles.insert(filename);
+				}
+			}
+
+			// Unlike the old stash queue, a bag file that cannot fit must be discovered again after the
+			// player frees a slot. The set itself de-duplicates files that are already waiting this tick.
+			for (auto& entry : boost::make_iterator_range(boost::filesystem::directory_iterator(bagFolder), {})) {
+				auto filename = std::wstring(entry.path().c_str());
+				boost::lock_guard<boost::mutex> guard(m_mutex);
+
+				if (boost::algorithm::ends_with(filename, ".csv") && m_bagQueue.insert(filename).second) {
+					LogToFile(LogLevel::INFO, std::wstring(L"Found player-bag file: ") + filename);
 				}
 			}
 		}
