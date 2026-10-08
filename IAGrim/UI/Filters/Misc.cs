@@ -15,14 +15,22 @@ namespace IAGrim.UI.Filters {
         private FirefoxCheckBox? cbExcludeMonsterInfrequents;
         public Misc() {
             InitializeComponent();
-            var existing = miscPanel.Controls.Cast<Control>().OrderBy(control => control.Top).ToList();
             cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 32);
             cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 59);
             cbMonsterInfrequents.Width = 285;
             cbExcludeMonsterInfrequents.Width = 285;
 
-            // Keep all original Misc controls, in their designer order, in two compact columns.
-            for (var i = 0; i < existing.Count; i++) {
+            // Keep every original Misc control explicitly represented. The custom panel's designer
+            // collection can omit controls when it is reparented/scaled, so do not infer this list.
+            var existing = new Control[] {
+                exp, health, cbDefense, cbOffensive, cbRunspeed, cbCastspeed, cbAttackSpeed,
+                cbMasterySkills, cbPetBonuses, cbHasPetBonus, setbonus, shieldStuff, cbReflect,
+                cbDuplicates, cbSocketed, cbRecentOnly, cbGrantsSkill, cbSummonerSkill,
+                cbEnergyRegen, cbWeaponLifeLeech, cbDamageConversion, cbCooldownReduction,
+                cbIncreaseArmor, cbPhysique, cbSpirit, cbCunning,
+            };
+
+            for (var i = 0; i < existing.Length; i++) {
                 var row = i / 2;
                 var column = i % 2;
                 existing[i].Left = column == 0 ? 3 : 148;
