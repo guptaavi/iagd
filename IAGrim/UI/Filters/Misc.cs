@@ -20,10 +20,16 @@ namespace IAGrim.UI.Filters {
             var existing = miscPanel.Controls.Cast<Control>().OrderBy(control => control.Top).ToList();
             cbMonsterInfrequents = CreateMiCheckBox("Monster Infrequents only", 32);
             cbExcludeMonsterInfrequents = CreateMiCheckBox("Exclude Monster Infrequents", 59);
-            for (var i = 0; i < existing.Count; i++) {
-                existing[i].Top = 86 + i * 27;
+            var all = new List<Control> { cbMonsterInfrequents, cbExcludeMonsterInfrequents };
+            all.AddRange(existing);
+            for (var i = 0; i < all.Count; i++) {
+                var row = i / 2;
+                var column = i % 2;
+                all[i].Left = column == 0 ? 3 : 148;
+                all[i].Top = 32 + row * 30;
+                all[i].Width = 140;
             }
-            miscPanel.Height = Math.Max(miscPanel.Height, 860);
+            miscPanel.Height = Math.Max(miscPanel.Height, 32 + ((all.Count + 1) / 2) * 30 + 8);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
