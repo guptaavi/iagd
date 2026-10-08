@@ -372,7 +372,8 @@ namespace IAGrim.UI.Tabs {
                     // Exactly what the web UI calls; the reply is only used for its toast, which we skip.
                     _searchController.JsIntegration.TransferItem(item.URL, transferAll);
                     UpdateListViewDelayed();
-                }
+                },
+                OnRequestMore = () => _searchController.JsIntegration.RequestMoreItems()
             };
 
             // Set membership comes straight out of the parsed game database; the factory is a shared, lazily
@@ -394,7 +395,7 @@ namespace IAGrim.UI.Tabs {
             // UpdateListView asks ModSelectionHandler for the default, which re-triggers this through its own
             // callback, so the list still arrives.
             UpdateListViewDelayed(100);
-            browserHandler.NativeItemSink = (items, replace, numFound) => _nativeGrid.SetItems(items, replace, numFound);
+            browserHandler.NativeItemSink = (items, replace, numFound, hasMore) => _nativeGrid.SetItems(items, replace, numFound, hasMore);
 
             Logger.Info("Native item grid enabled (WebView2 cannot present under Wine)");
         }

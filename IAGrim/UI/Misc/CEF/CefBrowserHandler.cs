@@ -29,7 +29,7 @@ namespace IAGrim.UI.Misc.CEF {
         /// Fed from the same SetItems/AddItems calls the web UI gets, so both views stay in sync and no
         /// search, filter or paging logic is duplicated.
         /// </summary>
-        public Action<List<List<JsonItem>>, bool, int>? NativeItemSink { get; set; }
+        public Action<List<List<JsonItem>>, bool, int, bool>? NativeItemSink { get; set; }
 
         private volatile bool _isReady;
         private volatile bool _isReadyUi;
@@ -159,7 +159,7 @@ namespace IAGrim.UI.Misc.CEF {
             if (NativeItemSink != null) {
                 // The native grid is in charge; serialising every result for a browser that never paints is
                 // pure waste on each search (and fills the log with "browser not yet initialized").
-                NativeItemSink.Invoke(items, true, numItemsFound);
+                NativeItemSink.Invoke(items, true, numItemsFound, hasMore);
                 return;
             }
 
@@ -187,7 +187,7 @@ namespace IAGrim.UI.Misc.CEF {
         // the user paginated past it.
         public void AddItems(List<List<JsonItem>> items, bool hasMore, int numItemsFound = -1) {
             if (NativeItemSink != null) {
-                NativeItemSink.Invoke(items, false, numItemsFound);
+                NativeItemSink.Invoke(items, false, numItemsFound, hasMore);
                 return;
             }
 

@@ -80,6 +80,9 @@ namespace IAGrim.UI.Tabs {
 
         /// <summary>Raised on double click: (item, transferAll). Wire to JavascriptIntegration.TransferItem.</summary>
         public Action<JsonItem, bool>? OnTransfer;
+        public Action? OnRequestMore;
+        private bool _hasMore;
+        private bool _requestingMore;
 
         public NativeItemGrid(bool darkMode) {
             _darkMode = darkMode;
@@ -98,6 +101,12 @@ namespace IAGrim.UI.Tabs {
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 BorderStyle = BorderStyle.None,
                 EnableHeadersVisualStyles = false,
+            };
+            _grid.Scroll += (_, e) => {
+                if (e.ScrollOrientation == ScrollOrientation.VerticalScroll && e.NewValue >= _grid.RowCount - 8 && _hasMore && !_requestingMore) {
+                    _requestingMore = true;
+                    OnRequestMore?.Invoke();
+                }
             };
 
             // Tall enough for the item icons; GD icons are up to 64x128 and get zoomed to fit.
@@ -373,9 +382,9 @@ namespace IAGrim.UI.Tabs {
         /// Mirrors CefBrowserHandler.SetItems/AddItems. <paramref name="groups"/> is the same shape the web UI
         /// gets: one inner list per "merged" stack of identical items, so the stack size is the inner count.
         /// </summary>
-        public void SetItems(List<List<JsonItem>> groups, bool replaceExisting, int numItemsFound) {
+        public void SetItems(List<List<JsonItem>> groups, bool replaceExisting, int numItemsFound, bool hasMore = false) {
             if (InvokeRequired) {
-                BeginInvoke(new Action(() => SetItems(groups, replaceExisting, numItemsFound)));
+                BeginInvoke(new Action(() => SetItems(groups, replaceExisting, numItemsFound, hasMore)));
                 return;
             }
 
@@ -392,6 +401,9 @@ namespace IAGrim.UI.Tabs {
             if (replaceExisting) {
                 _rows.Clear();
             }
+
+            _hasMore = hasMore;
+            _requestingMore = false;
 
             foreach (var group in groups) {
                 if (group.Count == 0) {
