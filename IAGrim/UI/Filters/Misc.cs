@@ -29,7 +29,7 @@ namespace IAGrim.UI.Filters {
             // collection can omit controls when it is reparented/scaled, so do not infer this list.
             var existing = new Control[] {
                 exp, health, cbDefense, cbOffensive, cbRunspeed, cbCastspeed, cbAttackSpeed,
-                cbMasterySkills, cbPetBonuses, cbHasPetBonus, setbonus, shieldStuff, cbReflect,
+                cbMasterySkills, cbPetBonuses, setbonus, shieldStuff, cbReflect,
                 cbDuplicates, cbSocketed, cbRecentOnly, cbGrantsSkill, cbSummonerSkill,
                 cbEnergyRegen, cbWeaponLifeLeech, cbDamageConversion, cbCooldownReduction,
                 cbIncreaseArmor, cbPhysique, cbSpirit, cbCunning,
@@ -39,17 +39,17 @@ namespace IAGrim.UI.Filters {
                 var row = i / 2;
                 var column = i % 2;
                 existing[i].Left = column == 0 ? 3 : 148;
-                existing[i].Top = 92 + row * 30;
+                existing[i].Top = 120 + row * 30;
                 existing[i].Width = 140;
             }
             // Force this control back into the custom panel's child collection after layout.
             miscPanel.Controls.Remove(cbHasPetBonus);
             cbHasPetBonus.Visible = true;
-            cbHasPetBonus.Left = 148;
-            cbHasPetBonus.Top = 212;
-            cbHasPetBonus.Width = 140;
+            cbHasPetBonus.Left = 3;
+            cbHasPetBonus.Top = 86;
+            cbHasPetBonus.Width = 285;
             miscPanel.Controls.Add(cbHasPetBonus);
-            miscPanel.Height = Math.Max(miscPanel.Height, 92 + ((existing.Length + 1) / 2) * 30 + 8);
+            miscPanel.Height = Math.Max(miscPanel.Height, 120 + ((existing.Length + 1) / 2) * 30 + 8);
             health.SupportsNumericFilter = true;
             cbDefense.SupportsNumericFilter = true;
             cbOffensive.SupportsNumericFilter = true;
