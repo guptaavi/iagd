@@ -69,6 +69,32 @@ namespace GAME
 		unsigned int unknownFoaField2;  // offset 0x188
 	};
 
+	// Character::GetInventoryReplica writes these records into a mem::vector.
+	// The first 0x190 bytes are the normal item replica.  The game appends the
+	// equipment location and an alternate-equipment flag for equipped items;
+	// bag items use equipmentLocation == UINT_MAX.  Keep the tail explicit so
+	// the element stride matches the retail Game.dll (0x198 bytes).
+	struct InventoryReplica
+	{
+		ItemReplicaInfo item;
+		unsigned int equipmentLocation;
+		unsigned char alternateEquipment;
+		unsigned char _padding[3];
+	};
+
+	static_assert(sizeof(InventoryReplica) == 0x198,
+		"InventoryReplica layout does not match retail Grim Dawn FOA v1.3");
+
+	// mem::vector has the same three-pointer layout as std::vector on this
+	// build.  This is used only as an ABI bridge for GetInventoryReplica; the
+	// buffer is supplied by the hook so the game does not need to allocate it.
+	struct InventoryReplicaVector
+	{
+		InventoryReplica* begin;
+		InventoryReplica* end;
+		InventoryReplica* capacity;
+	};
+
 	// The game writes this struct for us (Item::GetItemReplicaInfo) and reads it back
 	// (Item::CreateItem), so the layout has to match the shipped Game.dll exactly. Get
 	// it wrong and the game runs off the end of our object. Verify against
@@ -212,11 +238,24 @@ static auto fnItemGetItemReplicaInfo = ItemGetItemReplicaInfo(GetProcAddressOrLo
 typedef GAME::Player* (__fastcall* pGetMainPlayer)(GAME::GameEngine*);
 static auto fnGetMainPlayer = pGetMainPlayer(GetProcAddressOrLogToFile(L"game.dll", "?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ"));
 
-typedef GAME::ControllerPlayer* (__fastcall* pPlayerGetController)(GAME::Player*);
-static auto fnPlayerGetController = pPlayerGetController(GetProcAddressOrLogToFile(L"game.dll", "?GetController@?$ControllerAIStateT@VControllerPlayer@GAME@@VPlayer@2@@GAME@@IEAAAEAVControllerPlayer@2@XZ"));
+// As with GetInventoryCtrl, use the const overload.  The mutable overload can
+// resolve while returning a controller reference that is not the live player
+// controller used by the UI on the current build.
+typedef GAME::ControllerPlayer* (__fastcall* pPlayerGetController)(const GAME::Player*);
+static auto fnPlayerGetController = pPlayerGetController(GetProcAddressOrLogToFile(L"game.dll", "?GetController@?$ControllerAIStateT@VControllerPlayer@GAME@@VPlayer@2@@GAME@@IEBAAEBVControllerPlayer@2@XZ"));
 
-typedef GAME::PlayerInventoryCtrl* (__fastcall* pControllerGetInventoryCtrl)(GAME::ControllerPlayer*);
-static auto fnControllerGetInventoryCtrl = pControllerGetInventoryCtrl(GetProcAddressOrLogToFile(L"game.dll", "?GetInventoryCtrl@ControllerPlayer@GAME@@QEAAAEAVPlayerInventoryCtrl@2@XZ"));
+// The game exposes mutable and const overloads.  The const overload is the
+// route used by the live UI/controller and returns the actual inventory
+// controller; the mutable overload can resolve but reports a bogus zero-sack
+// inventory in the current game build.
+typedef GAME::PlayerInventoryCtrl* (__fastcall* pControllerGetInventoryCtrl)(const GAME::ControllerPlayer*);
+static auto fnControllerGetInventoryCtrl = pControllerGetInventoryCtrl(GetProcAddressOrLogToFile(L"game.dll", "?GetInventoryCtrl@ControllerPlayer@GAME@@QEBAAEBVPlayerInventoryCtrl@2@XZ"));
+
+typedef void (__fastcall* pCharacterGetInventoryReplica)(const GAME::Character*, GAME::InventoryReplicaVector&);
+static auto fnCharacterGetInventoryReplica = pCharacterGetInventoryReplica(GetProcAddressOrLogToFile(L"game.dll", "?GetInventoryReplica@Character@GAME@@QEBAXAEAV?$vector@UInventoryReplica@GAME@@@mem@@@Z"));
+
+typedef void* (__fastcall* pControllerCharacterGetEquipmentCtrl)(void*);
+static auto fnControllerCharacterGetEquipmentCtrl = pControllerCharacterGetEquipmentCtrl(GetProcAddressOrLogToFile(L"game.dll", "?GetEquipmentCtrl@ControllerCharacter@GAME@@QEAAAEAVEquipmentCtrl@2@XZ"));
 
 typedef unsigned int (__fastcall* pPlayerInventoryCtrl_GetNumberOfSacks)(const GAME::PlayerInventoryCtrl*);
 static auto fnPlayerInventoryCtrl_GetNumberOfSacks = pPlayerInventoryCtrl_GetNumberOfSacks(GetProcAddressOrLogToFile(L"game.dll", "?GetNumberOfSacks@PlayerInventoryCtrl@GAME@@QEBAIXZ"));

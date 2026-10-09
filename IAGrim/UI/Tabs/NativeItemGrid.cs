@@ -136,7 +136,7 @@ namespace IAGrim.UI.Tabs {
             AddColumn(nameof(ItemRow.Quality), "Rarity", 12);
             AddColumn(nameof(ItemRow.Level), "Level", 8);
             AddColumn(nameof(ItemRow.Slot), "Slot", 20);
-            AddColumn(nameof(ItemRow.Junk), "Junk", 7);
+            AddColumn(nameof(ItemRow.Junk), "Junk", 10);
             AddColumn(nameof(ItemRow.Count), "#", 6);
 
             _details = new RichTextBox {
@@ -521,6 +521,43 @@ namespace IAGrim.UI.Tabs {
             }
         }
 
+        /// <summary>
+        /// Removes rows whose owned stash records were acknowledged by the native in-game transfer hook.
+        /// The database row is already depleted at this point; removing it here also clears the stale Junk
+        /// marker from the currently loaded grid without forcing a full search and rebind.
+        /// </summary>
+        public void RemoveTransferredItems(IList<long> playerItemIds) {
+            if (playerItemIds.Count == 0) {
+                return;
+            }
+
+            if (InvokeRequired) {
+                BeginInvoke(new Action(() => RemoveTransferredItems(playerItemIds)));
+                return;
+            }
+
+            var ids = playerItemIds.ToHashSet();
+            var changed = false;
+            for (var i = _rows.Count - 1; i >= 0; i--) {
+                if (_rows[i].Item.PlayerItemId is long id && ids.Contains(id)) {
+                    _rows.RemoveAt(i);
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                ApplySortAndBind();
+
+                // The native grid deliberately receives results in small pages. If the acknowledged batch
+                // consumed the whole current page, pull the next buffered page immediately; otherwise the
+                // user sees a blank grid until they toggle a filter or scroll.
+                if (_rows.Count == 0 && _hasMore && !_requestingMore) {
+                    _requestingMore = true;
+                    OnRequestMore?.Invoke();
+                }
+            }
+        }
+
         private void ApplySortAndBind() {
             if (_sortColumn != null) {
                 Comparison<ItemRow> cmp = _sortColumn switch {
@@ -593,6 +630,14 @@ namespace IAGrim.UI.Tabs {
             }
 
             var colour = RarityColour(_rows[e.RowIndex].Quality);
+
+            if (e.ColumnIndex >= 0 && e.ColumnIndex < _grid.Columns.Count &&
+                _grid.Columns[e.ColumnIndex].Name == nameof(ItemRow.Junk) &&
+                !string.IsNullOrEmpty(_rows[e.RowIndex].Junk)) {
+                e.CellStyle!.ForeColor = Color.Gold;
+                e.CellStyle.SelectionForeColor = Color.Gold;
+                e.CellStyle.Font = new Font(e.CellStyle.Font, FontStyle.Bold);
+            }
 
             if (colour.HasValue) {
                 e.CellStyle!.ForeColor = colour.Value;
@@ -934,10 +979,12 @@ namespace IAGrim.UI.Tabs {
                 Quality = item.Quality ?? string.Empty;
                 Level = (int)item.Level;
                 Slot = PrettySlot(item.Slot);
-                Junk = item.IsJunk ? "Junk" : string.Empty;
             }
 
-            public string Junk { get; }
+            // Compute this from the underlying JsonItem instead of caching it in the row constructor. Marking
+            // or unmarking Junk updates JsonItem.IsJunk and rebinds the same rows; a cached string never changed,
+            // which made the persistent mark work while the Junk column appeared unchanged.
+            public string Junk => Item.IsJunk ? "YES" : string.Empty;
 
             /// <summary>Slots arrive as raw record names ("OneShot_Scroll", "ArmorTorso_Chest").</summary>
             private static string PrettySlot(string? slot) {

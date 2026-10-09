@@ -562,6 +562,23 @@ namespace IAGrim.UI.Tabs {
             UpdateListViewDelayed(_settings.GetLocal().PreferDelayedSearch ? 200 : 0);
         }
 
+        /// <summary>
+        /// Removes items acknowledged by the native bag-transfer hook from the already-loaded native grid.
+        /// The acknowledgement arrives on a timer thread, so marshal the update to this form's UI thread.
+        /// </summary>
+        public void RemoveTransferredItems(IList<long> playerItemIds) {
+            if (playerItemIds.Count == 0 || IsDisposed || !IsHandleCreated) {
+                return;
+            }
+
+            if (InvokeRequired) {
+                BeginInvoke(new Action(() => RemoveTransferredItems(playerItemIds)));
+                return;
+            }
+
+            _nativeGrid?.RemoveTransferredItems(playerItemIds);
+        }
+
         private void BeginSearchOnAutoSearch(object? sender, EventArgs e) {
             // Once the user finds the numeric stat filter on their own, the introduction banner is no longer relevant.
             var persistent = _settings.GetPersistent();

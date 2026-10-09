@@ -43,6 +43,7 @@ private:
 	static bool m_marketOpen;
 	static unsigned int m_vendorId;
 	static GAME::GameEngine* m_marketEngine;
+	static void* m_controllerCharacter;
 	static boost::mutex m_mutex;
 
 
@@ -69,6 +70,7 @@ private:
 	typedef bool (__thiscall* GameEngine_PlayerSaleRequest)(void*, unsigned int, unsigned int, bool);
 	typedef bool (__thiscall* PlayerInventoryCtrl_RemoveItem)(void*, unsigned int, bool);
 	typedef void (__thiscall* ControllerCharacter_SendRemoveItemFromInventory)(void*, unsigned int);
+	typedef void* (__thiscall* ControllerCharacter_GetEquipmentCtrl)(void*);
 	typedef bool (__thiscall* InventorySack_ContainsItem)(void*, unsigned int);
 
 
@@ -90,6 +92,7 @@ private:
 	static GameEngine_PlayerSaleRequest dll_GameEngine_PlayerSaleRequest;
 	static PlayerInventoryCtrl_RemoveItem dll_PlayerInventoryCtrl_RemoveItem;
 	static ControllerCharacter_SendRemoveItemFromInventory dll_ControllerCharacter_SendRemoveItemFromInventory;
+	static ControllerCharacter_GetEquipmentCtrl dll_ControllerCharacter_GetEquipmentCtrl;
 	static InventorySack_ContainsItem dll_InventorySack_ContainsItem;
 
 
@@ -102,6 +105,8 @@ private:
 	static void __fastcall Hooked_GameEngine_OpenMarket(void* This, unsigned int who, int* marketType, void* at);
 	static void __fastcall Hooked_GameEngine_CloseMarket(void* This, unsigned int who);
 	static void __fastcall Hooked_PlayerInventoryCtrl_DepositReagents(void* This);
+	static bool __fastcall Hooked_InventorySack_Sort(void* This, int sortMode);
+	static void* __fastcall Hooked_ControllerCharacter_GetEquipmentCtrl(void* This);
 
 
 	// Helper/internal methods
@@ -113,6 +118,7 @@ private:
 	static GAME::InventorySack* GetSackToDepositTo(GAME::GameEngine* gameEngine);
 	static GAME::ItemReplicaInfo* ReadReplicaInfo(const std::wstring& filename);
 	static bool ProcessBagItem(GAME::GameEngine* gameEngine, const std::wstring& filename);
+	static int MovePlayerBagsToIA(GAME::GameEngine* gameEngine, GAME::PlayerInventoryCtrl* inventory);
 	static void LoadNativeJunkIds();
 	static void SaveNativeJunkIds();
 	static bool SellNativeJunk(GAME::PlayerInventoryCtrl* inventory);

@@ -13,6 +13,7 @@ using static IAGrim.UI.StashPicker;
 namespace IAGrim.Parsers.Arz {
     internal class TransferStashService {
         private static readonly ILog Logger = LogManager.GetLogger(typeof(TransferStashService));
+        private readonly object _playerBagQueueLock = new();
 
 
         public void Deposit(IList<PlayerItem> playerItems, StashPickerResult? modOverride) {
@@ -44,27 +45,59 @@ namespace IAGrim.Parsers.Arz {
         /// </summary>
         public int DepositToPlayerBags(IList<PlayerItem> playerItems) {
             var queued = 0;
-            foreach (var item in playerItems) {
-                try {
-                    var path = Path.Combine(GlobalPaths.CsvLocationOutgoingBags, item.IsHardcore ? "hc" : "sc");
-                    if (!string.IsNullOrEmpty(item.Mod)) {
-                        path = Path.Combine(path, item.Mod);
-                    }
-                    Directory.CreateDirectory(path);
+            lock (_playerBagQueueLock) {
+                // The native hook moves accepted files to completed-bags and IA removes them after
+                // acknowledging the database row. Treat both locations as pending: otherwise a second
+                // click (or an IA restart) can create another game instance from the same IA item instance.
+                var pendingIds = GetPendingPlayerBagItemIds();
 
-                    // The DB id is deliberately in the filename so the completed-bag acknowledgement can
-                    // remove exactly this row after the game accepts it. The CSV itself has no DB identity.
-                    var csvFilename = Path.Combine(path, $"{item.Id}_{Guid.NewGuid():N}.csv");
-                    File.WriteAllText(csvFilename, CsvParsingService.Serialize(item));
-                    Logger.Info($"Queued item {item.Id} for player bags: {csvFilename}");
-                    queued++;
-                }
-                catch (IOException e) {
-                    Logger.Warn(e.Message, e);
+                foreach (var item in playerItems) {
+                    if (!pendingIds.Add(item.Id)) {
+                        Logger.Info($"Skipped item {item.Id}: player-bag transfer is already pending.");
+                        continue;
+                    }
+
+                    try {
+                        var path = Path.Combine(GlobalPaths.CsvLocationOutgoingBags, item.IsHardcore ? "hc" : "sc");
+                        if (!string.IsNullOrEmpty(item.Mod)) {
+                            path = Path.Combine(path, item.Mod);
+                        }
+                        Directory.CreateDirectory(path);
+
+                        // The DB id is deliberately in the filename so the completed-bag acknowledgement can
+                        // remove exactly this row after the game accepts it. The CSV itself has no DB identity.
+                        var csvFilename = Path.Combine(path, $"{item.Id}_{Guid.NewGuid():N}.csv");
+                        File.WriteAllText(csvFilename, CsvParsingService.Serialize(item));
+                        Logger.Info($"Queued item {item.Id} for player bags: {csvFilename}");
+                        queued++;
+                    }
+                    catch (IOException e) {
+                        pendingIds.Remove(item.Id);
+                        Logger.Warn(e.Message, e);
+                    }
                 }
             }
 
             return queued;
+        }
+
+        private static HashSet<long> GetPendingPlayerBagItemIds() {
+            var ids = new HashSet<long>();
+            foreach (var folder in new[] { GlobalPaths.CsvLocationOutgoingBags, GlobalPaths.CsvLocationCompletedBags }) {
+                if (!Directory.Exists(folder)) {
+                    continue;
+                }
+
+                foreach (var file in Directory.EnumerateFiles(folder, "*.csv", SearchOption.AllDirectories)) {
+                    var name = Path.GetFileNameWithoutExtension(file);
+                    var separator = name.IndexOf('_');
+                    if (separator > 0 && long.TryParse(name[..separator], out var id)) {
+                        ids.Add(id);
+                    }
+                }
+            }
+
+            return ids;
         }
 
 

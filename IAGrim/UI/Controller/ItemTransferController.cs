@@ -30,8 +30,11 @@ namespace IAGrim.UI.Controller {
 
         public class ItemsTransferredEventArgs : EventArgs {
             public IList<string> CloudIds { get; }
-            public ItemsTransferredEventArgs(IList<string> cloudIds) {
+            public IList<long> PlayerItemIds { get; }
+
+            public ItemsTransferredEventArgs(IList<string> cloudIds, IList<long>? playerItemIds = null) {
                 CloudIds = cloudIds;
+                PlayerItemIds = playerItemIds ?? new List<long>();
             }
         }
 
@@ -169,7 +172,12 @@ namespace IAGrim.UI.Controller {
             args.NumQueued = _transferStashService.DepositToPlayerBags(items);
             args.IsSuccessful = args.NumQueued > 0;
             if (args.IsSuccessful) {
-                _browser.ShowMessage($"Queued {args.NumQueued} item stack(s) for the player bags. Full bags remain recoverable.", UserFeedbackLevel.Success);
+                var skipped = items.Count - args.NumQueued;
+                var suffix = skipped > 0 ? $" Skipped {skipped} already-pending item(s)." : string.Empty;
+                _browser.ShowMessage($"Queued {args.NumQueued} item stack(s) for the player bags.{suffix} Full bags remain recoverable.", UserFeedbackLevel.Success);
+            }
+            else {
+                _browser.ShowMessage("All selected items are already queued for the player bags.", UserFeedbackLevel.Warning);
             }
         }
 
@@ -179,6 +187,9 @@ namespace IAGrim.UI.Controller {
             }
 
             try {
+                var transferredCloudIds = new List<string>();
+                var transferredPlayerItemIds = new List<long>();
+
                 foreach (var file in Directory.EnumerateFiles(GlobalPaths.CsvLocationCompletedBags, "*.csv", SearchOption.AllDirectories)) {
                     var name = Path.GetFileNameWithoutExtension(file);
                     var separator = name.IndexOf('_');
@@ -194,12 +205,20 @@ namespace IAGrim.UI.Controller {
                         _dao.Update(new List<PlayerItem> { item }, true);
                         JunkItemStore.Remove(id);
                         if (!string.IsNullOrEmpty(cloudId)) {
-                            OnItemsTransferredToGame?.Invoke(this, new ItemsTransferredEventArgs(new List<string> { cloudId }));
+                            transferredCloudIds.Add(cloudId);
                         }
+                        transferredPlayerItemIds.Add(id);
                         Logger.Info($"Native hook acknowledged player-bag transfer for item {id}");
                     }
 
                     File.Delete(file);
+                }
+
+                // Raise one batched notification after all acknowledgements have been applied. This lets
+                // the native grid remove the transferred rows in one UI update instead of refreshing once
+                // per item, and keeps the visible Junk state in sync with the database.
+                if (transferredPlayerItemIds.Count > 0 || transferredCloudIds.Count > 0) {
+                    OnItemsTransferredToGame?.Invoke(this, new ItemsTransferredEventArgs(transferredCloudIds, transferredPlayerItemIds));
                 }
             }
             catch (Exception ex) {

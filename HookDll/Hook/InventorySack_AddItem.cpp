@@ -6,6 +6,7 @@
 #include "InventorySack_AddItem.h"
 
 #include <codecvt>
+#include <memory>
 
 #include "Exports.h"
 #include <random>
@@ -48,6 +49,7 @@ InventorySack_AddItem::PlayerInventoryCtrl_DepositReagents InventorySack_AddItem
 InventorySack_AddItem::GameEngine_PlayerSaleRequest InventorySack_AddItem::dll_GameEngine_PlayerSaleRequest;
 InventorySack_AddItem::PlayerInventoryCtrl_RemoveItem InventorySack_AddItem::dll_PlayerInventoryCtrl_RemoveItem;
 InventorySack_AddItem::ControllerCharacter_SendRemoveItemFromInventory InventorySack_AddItem::dll_ControllerCharacter_SendRemoveItemFromInventory;
+InventorySack_AddItem::ControllerCharacter_GetEquipmentCtrl InventorySack_AddItem::dll_ControllerCharacter_GetEquipmentCtrl;
 InventorySack_AddItem::InventorySack_ContainsItem InventorySack_AddItem::dll_InventorySack_ContainsItem;
 std::wstring InventorySack_AddItem::m_storageFolder;
 int InventorySack_AddItem::m_stashTabLootFrom;
@@ -67,6 +69,7 @@ bool InventorySack_AddItem::m_nativeJunkLoaded;
 bool InventorySack_AddItem::m_marketOpen;
 unsigned int InventorySack_AddItem::m_vendorId;
 GAME::GameEngine* InventorySack_AddItem::m_marketEngine;
+void* InventorySack_AddItem::m_controllerCharacter;
 boost::mutex InventorySack_AddItem::m_mutex;
 
 void InventorySack_AddItem::EnableHook() {
@@ -129,6 +132,7 @@ void InventorySack_AddItem::EnableHook() {
 	dll_GameEngine_PlayerSaleRequest = (GameEngine_PlayerSaleRequest)GetProcAddressOrLogToFile(L"Game.dll", "?PlayerSaleRequest@GameEngine@GAME@@QEAA_NII_N@Z");
 	dll_PlayerInventoryCtrl_RemoveItem = (PlayerInventoryCtrl_RemoveItem)GetProcAddressOrLogToFile(L"Game.dll", "?RemoveItem@PlayerInventoryCtrl@GAME@@QEAA_NI_N@Z");
 	dll_ControllerCharacter_SendRemoveItemFromInventory = (ControllerCharacter_SendRemoveItemFromInventory)GetProcAddressOrLogToFile(L"Game.dll", "?SendRemoveItemFromInventory@ControllerCharacter@GAME@@QEAAXI@Z");
+	dll_ControllerCharacter_GetEquipmentCtrl = (ControllerCharacter_GetEquipmentCtrl)GetProcAddressOrLogToFile(L"Game.dll", "?GetEquipmentCtrl@ControllerCharacter@GAME@@QEAAAEAVEquipmentCtrl@2@XZ");
 	dll_InventorySack_ContainsItem = (InventorySack_ContainsItem)GetProcAddressOrLogToFile(L"Game.dll", "?ContainsItem@InventorySack@GAME@@QEBA_NI@Z");
 	LoadNativeJunkIds();
 
@@ -148,6 +152,18 @@ void InventorySack_AddItem::EnableHook() {
 		DetourTransactionBegin();
 		DetourUpdateThread(GetCurrentThread());
 		DetourAttach((PVOID*)&dll_PlayerInventoryCtrl_DepositReagents, Hooked_PlayerInventoryCtrl_DepositReagents);
+		DetourTransactionCommit();
+	}
+	if (SortInventorySack != nullptr) {
+		DetourTransactionBegin();
+		DetourUpdateThread(GetCurrentThread());
+		DetourAttach((PVOID*)&SortInventorySack, Hooked_InventorySack_Sort);
+		DetourTransactionCommit();
+	}
+	if (dll_ControllerCharacter_GetEquipmentCtrl != nullptr) {
+		DetourTransactionBegin();
+		DetourUpdateThread(GetCurrentThread());
+		DetourAttach((PVOID*)&dll_ControllerCharacter_GetEquipmentCtrl, Hooked_ControllerCharacter_GetEquipmentCtrl);
 		DetourTransactionCommit();
 	}
 
@@ -183,6 +199,7 @@ InventorySack_AddItem::InventorySack_AddItem(DataQueue* dataQueue, HANDLE hEvent
 	m_marketOpen = false;
 	m_vendorId = 0;
 	m_marketEngine = nullptr;
+	m_controllerCharacter = nullptr;
 }
 
 InventorySack_AddItem::InventorySack_AddItem() {
@@ -587,9 +604,9 @@ bool InventorySack_AddItem::IsSackToLootFrom(void* stashTab, GAME::GameEngine* g
 		);
 	}
 
-	// Is this the sack we lot items from?
-	const auto lastSackPtr = sacks->at(toLootFrom);
-	return static_cast<void*>(lastSackPtr) == stashTab;
+	// Is this the sack we want to loot from?
+	const auto sourceSackPtr = sacks->at(toLootFrom);
+	return static_cast<void*>(sourceSackPtr) == stashTab;
 }
 
 /// <summary>
@@ -752,7 +769,9 @@ bool InventorySack_AddItem::ProcessBagItem(GAME::GameEngine* gameEngine, const s
 	}
 
 	GAME::Player* player = fnGetMainPlayer(gameEngine);
-	GAME::ControllerPlayer* controller = player == nullptr ? nullptr : fnPlayerGetController(player);
+	GAME::ControllerPlayer* controller = m_controllerCharacter != nullptr
+		? reinterpret_cast<GAME::ControllerPlayer*>(m_controllerCharacter)
+		: (player == nullptr ? nullptr : fnPlayerGetController(player));
 	GAME::PlayerInventoryCtrl* inventory = controller == nullptr ? nullptr : fnControllerGetInventoryCtrl(controller);
 	if (inventory == nullptr) {
 		return false;
@@ -807,6 +826,123 @@ bool InventorySack_AddItem::ProcessBagItem(GAME::GameEngine* gameEngine, const s
 
 	delete replica;
 	return accepted;
+}
+
+/// <summary>
+/// Move eligible items from the live player bags directly into IA's incoming
+/// queue.  This is deliberately independent of the transfer-stash sacks: the
+/// database is unlimited, so opening an in-game stash is unnecessary.
+/// </summary>
+int InventorySack_AddItem::MovePlayerBagsToIA(
+	GAME::GameEngine* gameEngine,
+	GAME::PlayerInventoryCtrl* inventory)
+{
+	if (gameEngine == nullptr || inventory == nullptr || fnGetMainPlayer == nullptr ||
+		fnCharacterGetInventoryReplica == nullptr || fnPlayerInventoryRemoveItem == nullptr) {
+		LogToFile(LogLevel::WARNING, L"Direct bag-to-IA transfer skipped: inventory exports are unavailable");
+		return 0;
+	}
+
+	GAME::Player* player = fnGetMainPlayer(gameEngine);
+	if (player == nullptr) {
+		return 0;
+	}
+
+	GAME::Engine* engine = fnGetEngine();
+	GAME::GameInfo* gameInfo = engine == nullptr ? nullptr : fnGetGameInfo(engine);
+	if (gameInfo == nullptr) {
+		LogToFile(LogLevel::WARNING, L"Direct bag-to-IA transfer skipped: game context is unavailable");
+		return 0;
+	}
+
+	std::wstring modName;
+	bool isHardcore = false;
+	if (!GameContext::Resolve(gameInfo, modName, isHardcore)) {
+		LogToFile(LogLevel::WARNING, L"Direct bag-to-IA transfer skipped: game context could not be resolved");
+		return 0;
+	}
+
+	// A Grim Dawn character cannot carry anywhere near this many distinct
+	// item records.  Supplying our own capacity keeps the game allocator out of
+	// this temporary vector and lets us destroy only the string-bearing records
+	// that were actually constructed by GetInventoryReplica.
+	constexpr size_t maxReplicas = 1024;
+	std::unique_ptr<unsigned char[]> storage(new unsigned char[sizeof(GAME::InventoryReplica) * maxReplicas]);
+	GAME::InventoryReplicaVector replicas;
+	replicas.begin = reinterpret_cast<GAME::InventoryReplica*>(storage.get());
+	replicas.end = replicas.begin;
+	replicas.capacity = replicas.begin + maxReplicas;
+
+	try {
+		fnCharacterGetInventoryReplica(
+			reinterpret_cast<const GAME::Character*>(player), replicas);
+	}
+	catch (...) {
+		LogToFile(LogLevel::WARNING, L"Direct bag-to-IA transfer failed while reading character inventory replicas");
+		return 0;
+	}
+
+	if (replicas.begin != reinterpret_cast<GAME::InventoryReplica*>(storage.get()) ||
+		replicas.end < replicas.begin || replicas.end > replicas.capacity) {
+		// The fixed buffer should be sufficient for every legal player inventory.
+		// If a future game build changes that assumption, refuse the operation
+		// rather than touching memory owned by an unknown allocator.
+		LogToFile(LogLevel::WARNING, L"Direct bag-to-IA transfer refused: inventory replica count exceeded the safety buffer");
+		return 0;
+	}
+
+	const size_t count = static_cast<size_t>(replicas.end - replicas.begin);
+	int moved = 0;
+	void* removeController = m_controllerCharacter;
+	if (removeController == nullptr && fnPlayerGetController != nullptr) {
+		removeController = fnPlayerGetController(player);
+	}
+
+	for (size_t i = 0; i < count; ++i) {
+		GAME::InventoryReplica& inventoryReplica = replicas.begin[i];
+		GAME::ItemReplicaInfo& replica = inventoryReplica.item;
+
+		// GetInventoryReplica includes equipped items.  Those records carry an
+		// equipment location; UINT_MAX is the marker used by the game for bag
+		// items, which are the only items this button may move.
+		if (inventoryReplica.equipmentLocation != 0xffffffffu || replica.id == 0) {
+			continue;
+		}
+		if (!IsRelevant(replica)) {
+			continue;
+		}
+
+		// Write the durable IA record before removing the live item.  If the
+		// game refuses the removal, the item remains in the bag and the log makes
+		// the duplicate-safe failure visible instead of risking item loss.
+		if (!Persist(replica, isHardcore, modName, {})) {
+			LogToFile(LogLevel::WARNING, L"Direct bag-to-IA transfer could not persist item " + std::to_wstring(replica.id));
+			continue;
+		}
+
+		if (!fnPlayerInventoryRemoveItem(inventory, replica.id, true)) {
+			LogToFile(LogLevel::WARNING, L"Direct bag-to-IA item persisted but could not be removed from player bags: " + std::to_wstring(replica.id));
+			continue;
+		}
+
+		if (removeController != nullptr && dll_ControllerCharacter_SendRemoveItemFromInventory != nullptr) {
+			dll_ControllerCharacter_SendRemoveItemFromInventory(removeController, replica.id);
+		}
+		++moved;
+		LogToFile(LogLevel::INFO, L"Moved player-bag item directly into IA: native id " + std::to_wstring(replica.id));
+	}
+
+	// The vector storage itself belongs to this function.  Its elements contain
+	// std::string fields constructed by the game's copy routine, so run the
+	// normal ItemReplicaInfo destructor before releasing the raw buffer.
+	for (size_t i = 0; i < count; ++i) {
+		replicas.begin[i].item.~ItemReplicaInfo();
+	}
+
+	if (moved > 0) {
+		DisplayMessage(std::to_wstring(moved) + L" item(s) moved to Item Assistant", L"By Item Assistant");
+	}
+	return moved;
 }
 
 static std::wstring NativeJunkFile() {
@@ -868,8 +1004,9 @@ bool InventorySack_AddItem::SellNativeJunk(GAME::PlayerInventoryCtrl* inventory)
 	}
 
 	GAME::Player* player = fnGetMainPlayer(m_marketEngine);
-	GAME::ControllerPlayer* controller = player == nullptr || fnPlayerGetController == nullptr
-		? nullptr : fnPlayerGetController(player);
+	GAME::ControllerPlayer* controller = m_controllerCharacter != nullptr
+		? reinterpret_cast<GAME::ControllerPlayer*>(m_controllerCharacter)
+		: (player == nullptr || fnPlayerGetController == nullptr ? nullptr : fnPlayerGetController(player));
 	if (controller == nullptr) {
 		LogToFile(LogLevel::WARNING, L"Junk sale refused: player controller is unavailable");
 		return true;
@@ -946,8 +1083,9 @@ void __fastcall InventorySack_AddItem::Hooked_GameEngine_CloseMarket(void* This,
 void __fastcall InventorySack_AddItem::Hooked_PlayerInventoryCtrl_DepositReagents(void* This) {
 	if (m_isActive && m_marketOpen) {
 		GAME::Player* player = m_marketEngine == nullptr ? nullptr : fnGetMainPlayer(m_marketEngine);
-		GAME::ControllerPlayer* controller = player == nullptr || fnPlayerGetController == nullptr
-			? nullptr : fnPlayerGetController(player);
+		GAME::ControllerPlayer* controller = m_controllerCharacter != nullptr
+			? reinterpret_cast<GAME::ControllerPlayer*>(m_controllerCharacter)
+			: (player == nullptr || fnPlayerGetController == nullptr ? nullptr : fnPlayerGetController(player));
 		GAME::PlayerInventoryCtrl* inventory = controller == nullptr || fnControllerGetInventoryCtrl == nullptr
 			? nullptr : fnControllerGetInventoryCtrl(controller);
 		if (SellNativeJunk(inventory)) {
@@ -958,6 +1096,54 @@ void __fastcall InventorySack_AddItem::Hooked_PlayerInventoryCtrl_DepositReagent
 	if (dll_PlayerInventoryCtrl_DepositReagents != nullptr) {
 		dll_PlayerInventoryCtrl_DepositReagents(This);
 	}
+}
+
+bool __fastcall InventorySack_AddItem::Hooked_InventorySack_Sort(void* This, int sortMode) {
+	// Auto Sort is also exposed by the game's Player inventory UI.  The direct
+	// bag -> IA trigger is intentionally resolved against PlayerInventoryCtrl's
+	// sacks, not IA's transfer-stash vector.
+	if (m_isActive && !m_marketOpen) {
+		GAME::GameEngine* gameEngine = fnGetGameEngine();
+		GAME::Player* player = gameEngine == nullptr ? nullptr : fnGetMainPlayer(gameEngine);
+		GAME::ControllerPlayer* controller = m_controllerCharacter != nullptr
+			? reinterpret_cast<GAME::ControllerPlayer*>(m_controllerCharacter)
+			: (player == nullptr || fnPlayerGetController == nullptr ? nullptr : fnPlayerGetController(player));
+		GAME::PlayerInventoryCtrl* inventory = controller == nullptr || fnControllerGetInventoryCtrl == nullptr
+			? nullptr : fnControllerGetInventoryCtrl(controller);
+		int matchingPlayerSack = -1;
+		if (inventory != nullptr && fnPlayerInventoryCtrl_GetNumberOfSacks != nullptr &&
+			fnPlayerInventoryCtrl_GetSack != nullptr) {
+			unsigned int sackCount = fnPlayerInventoryCtrl_GetNumberOfSacks(inventory);
+			if (sackCount <= 64) {
+				for (unsigned int i = 0; i < sackCount; ++i) {
+					GAME::InventorySack* sack = fnPlayerInventoryCtrl_GetSack(inventory, static_cast<int>(i));
+					if (sack == reinterpret_cast<GAME::InventorySack*>(This)) {
+						matchingPlayerSack = static_cast<int>(i);
+					}
+				}
+			}
+		}
+		// Sack 1 is the right-hand player-bag Auto Sort control in Grim Dawn's
+		// current Player inventory layout.
+		if (matchingPlayerSack == 1) {
+			int moved = MovePlayerBagsToIA(gameEngine, inventory);
+			if (moved > 0) {
+				return true;
+			}
+		}
+	}
+
+	return SortInventorySack == nullptr ? false : SortInventorySack(This, sortMode);
+}
+
+void* __fastcall InventorySack_AddItem::Hooked_ControllerCharacter_GetEquipmentCtrl(void* This) {
+	void* result = dll_ControllerCharacter_GetEquipmentCtrl == nullptr
+		? nullptr : dll_ControllerCharacter_GetEquipmentCtrl(This);
+	if (This != nullptr && This != m_controllerCharacter) {
+		m_controllerCharacter = This;
+		LogToFile(LogLevel::INFO, L"Captured live ControllerCharacter from GetEquipmentCtrl");
+	}
+	return result;
 }
 
 /// <summary>

@@ -806,6 +806,7 @@ namespace IAGrim.UI {
             // machines before it can be transferred a second time and duplicated.
             _transferController.OnItemsTransferredToGame += (_, arg) => {
                 _webSocketSyncService?.SendDeletions(arg.CloudIds);
+                _searchWindow?.RemoveTransferredItems(arg.PlayerItemIds);
             };
 
             _csvFileMonitor.StartMonitoring(GlobalPaths.CsvLocationIngoing, "*.csv");
